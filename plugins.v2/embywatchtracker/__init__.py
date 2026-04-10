@@ -322,6 +322,14 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         return form, defaults
 
+    def get_api(self) -> List[Dict[str, Any]]:
+        """
+        Get plugin API endpoints
+
+        :return: API definitions
+        """
+        return []
+
     def get_page(self) -> Optional[List[dict]]:
         """
         Get plugin detail page
