@@ -9,8 +9,8 @@ from typing import Optional, List, Dict, Any, Tuple
 from apscheduler.triggers.cron import CronTrigger
 
 from app.plugins import _PluginBase
-from app.schemas.types import EventType, NotificationType
-from app.core.event import EventManager
+from app.schemas.types import EventType, NotificationType, MediaServerType
+from app.helper.service import ServiceConfigHelper
 
 from .emby_client import EmbyClient
 from .models import WatchHistory, MovieWatchRecord, TvShowWatchRecord, EpisodeWatchRecord
@@ -44,6 +44,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         self._notifier: Optional[WatchTrackerNotifier] = None
         self._scheduler = None
         # Config values
+        self._selected_server: str = ""
         self._server_url: str = ""
         self._api_key: str = ""
         self._emby_username: str = ""
@@ -51,6 +52,27 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         self._enable_notification: bool = True
         self._fuzzy_threshold: float = 0.9
         self._incremental_sync: bool = True
+
+    def _get_emby_servers(self) -> List[Dict[str, str]]:
+        """
+        Get list of configured Emby servers from MoviePilot
+
+        :return: List of server info dicts with name, url, api_key
+        """
+        servers = []
+        try:
+            configs = ServiceConfigHelper.get_mediaserver_configs()
+            for config in configs:
+                if config and config.type == MediaServerType.Emby.value:
+                    server_config = config.config or {}
+                    servers.append({
+                        "name": config.name,
+                        "url": server_config.get("url", ""),
+                        "api_key": server_config.get("api_key", "")
+                    })
+        except Exception as e:
+            logger.error(f"Failed to get Emby servers: {e}")
+        return servers
 
     def init_plugin(self, config: dict = None) -> None:
         """
@@ -64,6 +86,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             config = self.get_config() or {}
 
         # Load configuration
+        self._selected_server = config.get("emby_server", "")
         self._server_url = config.get("emby_server_url", "").rstrip("/")
         self._api_key = config.get("emby_api_key", "")
         self._emby_username = config.get("emby_username", "")
@@ -71,6 +94,10 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         self._enable_notification = config.get("enable_notification", True)
         self._fuzzy_threshold = float(config.get("fuzzy_match_threshold", 0.9))
         self._incremental_sync = config.get("enable_incremental_sync", True)
+
+        # If server is selected from MoviePilot config, use that
+        if self._selected_server:
+            self._use_moviepilot_server(self._selected_server)
 
         if not self._server_url or not self._api_key or not self._emby_username:
             logger.warning("Emby Watch Tracker plugin is not fully configured")
@@ -101,6 +128,28 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         self._register_events()
 
         logger.info("Emby Watch Tracker Plugin initialized successfully")
+
+    def _use_moviepilot_server(self, server_name: str) -> bool:
+        """
+        Use Emby server configured in MoviePilot
+
+        :param server_name: Server name in MoviePilot
+        :return: True if successful
+        """
+        try:
+            configs = ServiceConfigHelper.get_mediaserver_configs()
+            config = next((c for c in configs if c.name == server_name), None)
+            if not config or config.type != MediaServerType.Emby.value:
+                logger.warning(f"Server {server_name} is not an Emby server")
+                return False
+
+            server_config = config.config or {}
+            self._server_url = server_config.get("url", "").rstrip("/")
+            self._api_key = server_config.get("api_key", "")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to use MoviePilot server: {e}")
+            return False
 
     def get_state(self) -> bool:
         """
@@ -158,6 +207,13 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 "methods": ["GET"],
                 "summary": "测试Emby连接",
                 "description": "测试Emby服务器连接是否正常"
+            },
+            {
+                "path": "/embywatchtracker/servers",
+                "endpoint": self.api_get_servers,
+                "methods": ["GET"],
+                "summary": "获取Emby服务器列表",
+                "description": "获取MoviePilot中配置的Emby服务器列表"
             }
         ]
 
@@ -167,6 +223,11 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         :return: (form config, default values)
         """
+        # Get available Emby servers from MoviePilot
+        emby_servers = self._get_emby_servers()
+        server_items = [{"title": s["name"], "value": s["name"]} for s in emby_servers]
+        server_items.insert(0, {"title": "手动输入", "value": ""})
+
         form = [
             {
                 "component": "VCard",
@@ -174,6 +235,22 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                     {
                         "component": "VCardTitle",
                         "text": "Emby服务器配置"
+                    },
+                    {
+                        "component": "VCardText",
+                        "content": [
+                            {
+                                "component": "VSelect",
+                                "props": {
+                                    "label": "选择服务器（可选）",
+                                    "placeholder": "从MoviePilot配置中选择",
+                                    "model": "emby_server",
+                                    "items": server_items,
+                                    "clearable": True,
+                                    "hint": "从MoviePilot已配置的Emby服务器中选择，或手动输入"
+                                }
+                            }
+                        ]
                     },
                     {
                         "component": "VCardText",
@@ -282,6 +359,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         ]
 
         defaults = {
+            "emby_server": self._selected_server,
             "emby_server_url": self._server_url,
             "emby_api_key": self._api_key,
             "emby_username": self._emby_username,
@@ -301,8 +379,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         """
         history = self._load_history()
         stats = WatchTrackerUI.build_stats(history)
-        movies = WatchTrackerUI.build_movies_list(history)
-        shows = WatchTrackerUI.build_tv_shows_list(history)
 
         return [
             {
@@ -402,7 +478,10 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 text = f"📺 {item['title']}"
             items.append({
                 "component": "VListItem",
-                "props": {"title": text, "subtitle": item.get("watched_at", "")[:10] if item.get("watched_at") else ""}
+                "props": {
+                    "title": text,
+                    "subtitle": (item.get("watched_at", "")[:10] if item.get("watched_at") else "")
+                }
             })
         return items
 
@@ -420,11 +499,9 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             history = WatchHistory()
             history.last_sync_time = data.get("last_sync_time", 0)
 
-            # Load movies
             for movie_data in data.get("movies", []):
                 history.movies.append(MovieWatchRecord(**movie_data))
 
-            # Load TV shows
             for tv_data in data.get("tv_shows", []):
                 episodes = [
                     EpisodeWatchRecord(**ep)
@@ -451,12 +528,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         try:
             data = {
                 "movies": [
-                    {
-                        "id": m.id,
-                        "name": m.name,
-                        "year": m.year,
-                        "watched_at": m.watched_at
-                    }
+                    {"id": m.id, "name": m.name, "year": m.year, "watched_at": m.watched_at}
                     for m in history.movies
                 ],
                 "tv_shows": [
@@ -464,13 +536,8 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         "series_name": tv.series_name,
                         "series_id": tv.series_id,
                         "episodes": [
-                            {
-                                "id": ep.id,
-                                "season": ep.season,
-                                "episode": ep.episode,
-                                "name": ep.name,
-                                "watched_at": ep.watched_at
-                            }
+                            {"id": ep.id, "season": ep.season, "episode": ep.episode,
+                             "name": ep.name, "watched_at": ep.watched_at}
                             for ep in tv.episodes
                         ]
                     }
@@ -497,10 +564,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         logger.info("Starting Emby watch history sync")
 
         try:
-            # Load existing history
             history = self._load_history()
-
-            # Get watched items from Emby
             movies = self._emby_client.get_watched_movies(self._user_id)
             episodes = self._emby_client.get_watched_episodes(self._user_id)
 
@@ -514,26 +578,20 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
             movies_added = 0
             episodes_added = 0
-
-            # Track existing IDs for deduplication
             existing_movie_ids = {m.id for m in history.movies}
 
-            # Sync movies
             for movie_item in movies:
                 if movie_item.played and movie_item.id not in existing_movie_ids:
-                    movie_record = MovieWatchRecord(
+                    history.movies.append(MovieWatchRecord(
                         id=movie_item.id,
                         name=movie_item.name,
                         year=movie_item.year,
                         watched_at=movie_item.last_played_date
-                    )
-                    history.movies.append(movie_record)
+                    ))
                     movies_added += 1
 
-            # Sync episodes
             for episode_item in episodes:
                 if episode_item.played:
-                    # Check if episode already exists
                     episode_record = EpisodeWatchRecord(
                         id=episode_item.id,
                         season=episode_item.season_number or 0,
@@ -542,12 +600,10 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         watched_at=episode_item.last_played_date
                     )
 
-                    # Find or create series
                     series_name = episode_item.series_name or "Unknown Series"
                     found = False
                     for tv_show in history.tv_shows:
                         if tv_show.series_name == series_name:
-                            # Check if episode already exists
                             for existing_ep in tv_show.episodes:
                                 if (existing_ep.season == episode_record.season and
                                         existing_ep.episode == episode_record.episode):
@@ -559,21 +615,16 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                             break
 
                     if not found:
-                        new_tv_show = TvShowWatchRecord(
+                        history.tv_shows.append(TvShowWatchRecord(
                             series_name=series_name,
                             series_id=None,
                             episodes=[episode_record]
-                        )
-                        history.tv_shows.append(new_tv_show)
+                        ))
                         episodes_added += 1
 
-            # Update sync time
             history.last_sync_time = int(__import__("time").time())
-
-            # Save history
             self._save_history(history)
 
-            # Update matcher
             self._matcher = MediaMatcher(history, self._fuzzy_threshold)
             self._notifier = WatchTrackerNotifier(self._matcher, self._enable_notification)
 
@@ -606,11 +657,9 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         if not title:
             return
 
-        # Check if already watched
         message = self._notifier.check_and_notify(title, media_type, year)
 
         if message:
-            # Send notification to user
             self.post_message(
                 mtype=NotificationType.Plugin,
                 title="Emby观影提醒",
@@ -624,11 +673,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             return {"success": False, "message": "插件未配置"}
 
         movies, episodes = self._do_sync()
-        return {
-            "success": True,
-            "movies_added": movies,
-            "episodes_added": episodes
-        }
+        return {"success": True, "movies_added": movies, "episodes_added": episodes}
 
     def api_stats(self) -> Dict[str, Any]:
         """API: Get watch statistics"""
@@ -657,3 +702,8 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             return {"success": True, "message": "连接成功"}
         else:
             return {"success": False, "message": "连接失败"}
+
+    def api_get_servers(self) -> Dict[str, Any]:
+        """API: Get available Emby servers from MoviePilot"""
+        servers = self._get_emby_servers()
+        return {"success": True, "data": servers}
