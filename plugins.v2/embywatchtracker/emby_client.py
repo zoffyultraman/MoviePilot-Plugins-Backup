@@ -3,7 +3,6 @@ Emby API Client for Emby Watch Tracker Plugin
 """
 import requests
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 import logging
 
 from .models import EmbyUser, EmbyItem

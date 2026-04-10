@@ -3,7 +3,6 @@ Data models for Emby Watch Tracker Plugin
 """
 from dataclasses import dataclass, field
 from typing import List, Optional
-from datetime import datetime
 
 
 @dataclass

@@ -166,57 +166,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             self._scheduler = None
         logger.info("Emby Watch Tracker Plugin stopped")
 
-    def get_api(self) -> List[Dict[str, Any]]:
-        """
-        Get plugin API endpoints
-
-        :return: API definitions
-        """
-        return [
-            {
-                "path": "/embywatchtracker/sync",
-                "endpoint": self.api_sync,
-                "methods": ["GET"],
-                "summary": "手动同步观影记录",
-                "description": "立即触发Emby观影记录同步"
-            },
-            {
-                "path": "/embywatchtracker/stats",
-                "endpoint": self.api_stats,
-                "methods": ["GET"],
-                "summary": "获取观影统计",
-                "description": "获取当前观影统计数据"
-            },
-            {
-                "path": "/embywatchtracker/movies",
-                "endpoint": self.api_movies,
-                "methods": ["GET"],
-                "summary": "获取电影列表",
-                "description": "获取已观看电影列表"
-            },
-            {
-                "path": "/embywatchtracker/tvshows",
-                "endpoint": self.api_tvshows,
-                "methods": ["GET"],
-                "summary": "获取电视剧列表",
-                "description": "获取已观看电视剧列表"
-            },
-            {
-                "path": "/embywatchtracker/test",
-                "endpoint": self.api_test_connection,
-                "methods": ["GET"],
-                "summary": "测试Emby连接",
-                "description": "测试Emby服务器连接是否正常"
-            },
-            {
-                "path": "/embywatchtracker/servers",
-                "endpoint": self.api_get_servers,
-                "methods": ["GET"],
-                "summary": "获取Emby服务器列表",
-                "description": "获取MoviePilot中配置的Emby服务器列表"
-            }
-        ]
-
     def get_form(self) -> Tuple[Optional[List[dict]], Dict[str, Any]]:
         """
         Get plugin configuration form
@@ -666,44 +615,3 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 text=message
             )
 
-    # API endpoints
-    def api_sync(self) -> Dict[str, Any]:
-        """API: Trigger manual sync"""
-        if not self._user_id:
-            return {"success": False, "message": "插件未配置"}
-
-        movies, episodes = self._do_sync()
-        return {"success": True, "movies_added": movies, "episodes_added": episodes}
-
-    def api_stats(self) -> Dict[str, Any]:
-        """API: Get watch statistics"""
-        history = self._load_history()
-        stats = WatchTrackerUI.build_stats(history)
-        return {"success": True, "data": stats}
-
-    def api_movies(self) -> Dict[str, Any]:
-        """API: Get watched movies list"""
-        history = self._load_history()
-        movies = WatchTrackerUI.build_movies_list(history)
-        return {"success": True, "data": movies}
-
-    def api_tvshows(self) -> Dict[str, Any]:
-        """API: Get watched TV shows list"""
-        history = self._load_history()
-        shows = WatchTrackerUI.build_tv_shows_list(history)
-        return {"success": True, "data": shows}
-
-    def api_test_connection(self) -> Dict[str, Any]:
-        """API: Test Emby connection"""
-        if not self._emby_client:
-            return {"success": False, "message": "插件未配置"}
-
-        if self._emby_client.test_connection():
-            return {"success": True, "message": "连接成功"}
-        else:
-            return {"success": False, "message": "连接失败"}
-
-    def api_get_servers(self) -> Dict[str, Any]:
-        """API: Get available Emby servers from MoviePilot"""
-        servers = self._get_emby_servers()
-        return {"success": True, "data": servers}
