@@ -96,20 +96,23 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         # Load configuration
         self._selected_server = config.get("emby_server", "")
-        self._server_url = config.get("emby_server_url", "").rstrip("/")
-        self._api_key = config.get("emby_api_key", "")
         self._emby_username = config.get("emby_username", "")
         self._sync_interval_hours = int(config.get("sync_interval_hours", 6))
         self._enable_notification = config.get("enable_notification", True)
         self._fuzzy_threshold = float(config.get("fuzzy_match_threshold", 0.9))
         self._incremental_sync = config.get("enable_incremental_sync", True)
 
-        # If server is selected from MoviePilot config, use that
-        if self._selected_server:
-            self._use_moviepilot_server(self._selected_server)
+        # Auto-get server config from MoviePilot
+        if not self._selected_server:
+            logger.warning("Emby Watch Tracker plugin is not configured: no server selected")
+            return
 
-        if not self._server_url or not self._api_key or not self._emby_username:
+        if not self._use_moviepilot_server(self._selected_server):
             logger.warning("Emby Watch Tracker plugin is not fully configured")
+            return
+
+        if not self._emby_username:
+            logger.warning("Emby Watch Tracker plugin is not configured: no username")
             return
 
         # Initialize Emby client
@@ -181,10 +184,9 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         :return: (form config, default values)
         """
-        # Get available Emby servers from MoviePilot
+        # Get available Emby servers from MoviePilot directly
         emby_servers = self._get_emby_servers()
         server_items = [{"title": s["name"], "value": s["name"]} for s in emby_servers]
-        server_items.insert(0, {"title": "手动输入", "value": ""})
 
         form = [
             {
@@ -200,45 +202,22 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                             {
                                 "component": "VSelect",
                                 "props": {
-                                    "label": "选择服务器（可选）",
-                                    "placeholder": "从MoviePilot配置中选择",
+                                    "label": "选择Emby服务器",
+                                    "placeholder": "请选择MoviePilot中配置的Emby服务器",
                                     "model": "emby_server",
                                     "items": server_items,
-                                    "clearable": True,
-                                    "hint": "从MoviePilot已配置的Emby服务器中选择，或手动输入"
-                                }
-                            }
-                        ]
-                    },
-                    {
-                        "component": "VCardText",
-                        "content": [
-                            {
-                                "component": "VTextField",
-                                "props": {
-                                    "label": "Emby服务器地址",
-                                    "placeholder": "http://localhost:8096",
-                                    "model": "emby_server_url",
-                                    "clearable": True
+                                    "clearable": False,
+                                    "hint": "自动读取MoviePilot中已配置的Emby服务器"
                                 }
                             },
                             {
                                 "component": "VTextField",
                                 "props": {
-                                    "label": "API Key",
-                                    "placeholder": "Emby API Key",
-                                    "model": "emby_api_key",
-                                    "clearable": True,
-                                    "type": "password"
-                                }
-                            },
-                            {
-                                "component": "VTextField",
-                                "props": {
-                                    "label": "用户名",
-                                    "placeholder": "Emby登录用户名",
+                                    "label": "Emby用户名",
+                                    "placeholder": "输入要追踪的Emby用户名",
                                     "model": "emby_username",
-                                    "clearable": True
+                                    "clearable": True,
+                                    "hint": "输入你在Emby中登录的用户名"
                                 }
                             }
                         ]
@@ -318,8 +297,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         defaults = {
             "emby_server": self._selected_server,
-            "emby_server_url": self._server_url,
-            "emby_api_key": self._api_key,
             "emby_username": self._emby_username,
             "sync_interval_hours": self._sync_interval_hours,
             "enable_notification": self._enable_notification,
