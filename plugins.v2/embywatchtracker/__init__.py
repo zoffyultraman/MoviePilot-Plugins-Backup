@@ -29,7 +29,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
     plugin_version = "1.0.0"
     plugin_icon = "emby.png"
     plugin_desc = "同步Emby用户观影记录，在MoviePilot中展示已观看媒体"
-    plugin_author = "MoviePilot Plugin Developer"
+    plugin_author = "zoffyultraman"
     plugin_order = 9999
     # 可使用的用户级别，1为所有用户可见，2为仅认证用户可见
     auth_level = 1
