@@ -330,8 +330,11 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         """
         history = self._load_history()
         stats = WatchTrackerUI.build_stats(history)
+        movies = WatchTrackerUI.build_movies_list(history)
+        shows = WatchTrackerUI.build_tv_shows_list(history)
 
         return [
+            # 统计卡片
             {
                 "component": "VRow",
                 "content": [
@@ -376,25 +379,139 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                     }
                 ]
             },
+            # 标签页切换
             {
                 "component": "VCard",
                 "props": {"class": "mt-4"},
                 "content": [
                     {
-                        "component": "VCardTitle",
-                        "text": "最近观看"
+                        "component": "VTabs",
+                        "props": {"modelValue": "movies_tab"},
+                        "content": [
+                            {"component": "VTab", "props": {"value": "movies"}, "text": f"电影 ({stats['movie_count']})"},
+                            {"component": "VTab", "props": {"value": "tvshows"}, "text": f"电视剧 ({stats['tv_show_count']})"},
+                            {"component": "VTab", "props": {"value": "recent"}, "text": "最近观看"}
+                        ]
                     },
                     {
-                        "component": "VCardText",
+                        "component": "VWindow",
+                        "props": {"modelValue": "movies_tab"},
                         "content": [
+                            # 电影列表
                             {
-                                "component": "VList",
-                                "props": {"density": "compact"},
-                                "content": self._build_recent_list(history)
+                                "component": "VWindowItem",
+                                "props": {"value": "movies"},
+                                "content": self._build_movies_list_content(movies)
+                            },
+                            # 电视剧列表
+                            {
+                                "component": "VWindowItem",
+                                "props": {"value": "tvshows"},
+                                "content": self._build_tvshows_list_content(shows)
+                            },
+                            # 最近观看
+                            {
+                                "component": "VWindowItem",
+                                "props": {"value": "recent"},
+                                "content": self._build_recent_content(history)
                             }
                         ]
                     }
                 ]
+            }
+        ]
+
+    def _build_movies_list_content(self, movies: List[Dict]) -> List[Dict]:
+        """构建电影列表内容"""
+        if not movies:
+            return [{"component": "VCardText", "text": "暂无观看记录"}]
+
+        items = []
+        for movie in movies:
+            items.append({
+                "component": "VListItem",
+                "props": {
+                    "title": f"🎬 {movie['title']}" + (f" ({movie['year']})" if movie.get('year') else ""),
+                    "subtitle": f"观看时间: {movie.get('watched_at', '未知')}" if movie.get('watched_at') else ""
+                }
+            })
+
+        return [
+            {
+                "component": "VList",
+                "props": {"density": "compact"},
+                "content": items
+            }
+        ]
+
+    def _build_tvshows_list_content(self, shows: List[Dict]) -> List[Dict]:
+        """构建电视剧列表内容"""
+        if not shows:
+            return [{"component": "VCardText", "text": "暂无观看记录"}]
+
+        cards = []
+        for show in shows:
+            # 集数信息
+            episode_text = f"共 {len(show.get('episodes', []))} 集"
+            episodes = show.get('episodes', [])
+            if episodes:
+                # 显示前几集和最后几集
+                if len(episodes) <= 5:
+                    ep_detail = ", ".join([f"S{ep['season']:02d}E{ep['episode']:02d}" for ep in episodes])
+                else:
+                    first_eps = episodes[:3]
+                    last_eps = episodes[-2:]
+                    ep_detail = ", ".join([f"S{ep['season']:02d}E{ep['episode']:02d}" for ep in first_eps])
+                    ep_detail += " ... "
+                    ep_detail += ", ".join([f"S{ep['season']:02d}E{ep['episode']:02d}" for ep in last_eps])
+
+            cards.append({
+                "component": "VCard",
+                "props": {"class": "mb-2"},
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "text": f"📺 {show['title']}"
+                    },
+                    {
+                        "component": "VCardText",
+                        "text": f"{episode_text}"
+                    },
+                    {
+                        "component": "VCardText",
+                        "props": {"class": "text-caption", "style": "color: #666;"},
+                        "text": ep_detail if episodes else ""
+                    }
+                ]
+            })
+
+        return cards
+
+    def _build_recent_content(self, history: WatchHistory) -> List[Dict]:
+        """构建最近观看内容"""
+        recent = WatchTrackerUI.build_recent_watches(history, limit=20)
+
+        if not recent:
+            return [{"component": "VCardText", "text": "暂无观看记录"}]
+
+        items = []
+        for item in recent:
+            icon = "🎬" if item["type"] == "Movie" else "📺"
+            title = f"{icon} {item['title']}"
+            subtitle = f"观看时间: {item.get('watched_at', '未知')[:10]}" if item.get('watched_at') else ""
+            items.append({
+                "component": "VListItem",
+                "props": {
+                    "title": title,
+                    "subtitle": subtitle
+                }
+            })
+
+        return [
+            {
+                "component": "VList",
+                "props": {"density": "compact"},
+                "content": items
             }
         ]
 
@@ -417,24 +534,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
     def _register_events(self):
         """Register event handlers"""
         self.eventmanager.register(EventType.SubscribeAdded)(self._on_subscribe_added)
-
-    def _build_recent_list(self, history: WatchHistory) -> List[Dict]:
-        """Build recent watches list items"""
-        recent = WatchTrackerUI.build_recent_watches(history, limit=10)
-        items = []
-        for item in recent:
-            if item["type"] == "Movie":
-                text = f"🎬 {item['title']}"
-            else:
-                text = f"📺 {item['title']}"
-            items.append({
-                "component": "VListItem",
-                "props": {
-                    "title": text,
-                    "subtitle": (item.get("watched_at", "")[:10] if item.get("watched_at") else "")
-                }
-            })
-        return items
 
     def _load_history(self) -> WatchHistory:
         """
