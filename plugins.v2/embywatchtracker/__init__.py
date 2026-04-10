@@ -330,98 +330,173 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         """
         return []
 
-    def get_page(self) -> Optional[List[dict]]:
+    def get_page(self) -> List[dict]:
         """
-        Get plugin detail page
-
-        :return: Page configuration with data
+        拼装插件详情页面
         """
         history = self._load_history()
         stats = WatchTrackerUI.build_stats(history)
         movies = WatchTrackerUI.build_movies_list(history)
         shows = WatchTrackerUI.build_tv_shows_list(history)
+        recent = WatchTrackerUI.build_recent_watches(history, limit=20)
+
+        # 无数据时
+        if not history.movies and not history.tv_shows:
+            return [
+                {
+                    'component': 'div',
+                    'text': '暂无观看记录',
+                    'props': {'class': 'text-center pa-4'}
+                }
+            ]
+
+        # 构建统计卡片
+        stat_cards = [
+            self._build_stat_card('电影', str(stats['movie_count']), 'primary'),
+            self._build_stat_card('电视剧', str(stats['tv_show_count']), 'success'),
+            self._build_stat_card('已看集数', str(stats['episode_count']), 'info'),
+        ]
+
+        # 构建电影表格
+        movie_headers = [
+            {'text': '电影名称', 'key': 'title', 'class': 'text-start'},
+            {'text': '年份', 'key': 'year', 'class': 'text-start'},
+            {'text': '观看时间', 'key': 'watched_at', 'class': 'text-start'},
+        ]
+        movie_rows = []
+        for movie in movies:
+            movie_rows.append({
+                'component': 'tr',
+                'content': [
+                    {'component': 'td', 'text': f"🎬 {movie.get('title', '')}"},
+                    {'component': 'td', 'text': str(movie.get('year', '-'))},
+                    {'component': 'td', 'text': movie.get('watched_at', '-')[:10] if movie.get('watched_at') else '-'},
+                ]
+            })
+
+        # 构建电视剧表格
+        tvshow_headers = [
+            {'text': '剧集名称', 'key': 'title', 'class': 'text-start'},
+            {'text': '已看集数', 'key': 'count', 'class': 'text-start'},
+        ]
+        tvshow_rows = []
+        for show in shows:
+            tvshow_rows.append({
+                'component': 'tr',
+                'content': [
+                    {'component': 'td', 'text': f"📺 {show.get('title', '')}"},
+                    {'component': 'td', 'text': str(len(show.get('episodes', [])))},
+                ]
+            })
+
+        # 构建最近观看表格
+        recent_headers = [
+            {'text': '类型', 'key': 'type', 'class': 'text-start'},
+            {'text': '名称', 'key': 'title', 'class': 'text-start'},
+            {'text': '观看时间', 'key': 'watched_at', 'class': 'text-start'},
+        ]
+        recent_rows = []
+        for item in recent:
+            icon = "🎬" if item.get('type') == 'Movie' else "📺"
+            recent_rows.append({
+                'component': 'tr',
+                'content': [
+                    {'component': 'td', 'text': icon},
+                    {'component': 'td', 'text': item.get('title', '-')},
+                    {'component': 'td', 'text': item.get('watched_at', '-')[:10] if item.get('watched_at') else '-'},
+                ]
+            })
 
         return [
-            # 统计卡片
             {
-                "component": "VRow",
-                "content": [
+                'component': 'VRow',
+                'content': stat_cards
+            },
+            {
+                'component': 'VRow',
+                'content': [
                     {
-                        "component": "VCol",
-                        "props": {"cols": 4},
-                        "content": [
+                        'component': 'VCol',
+                        'props': {'cols': 12},
+                        'content': [
                             {
-                                "component": "VCard",
-                                "props": {"color": "primary"},
-                                "content": [
-                                    {"component": "VCardText", "text": f"电影: {stats['movie_count']}"}
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 4},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"color": "success"},
-                                "content": [
-                                    {"component": "VCardText", "text": f"电视剧: {stats['tv_show_count']}"}
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 4},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"color": "info"},
-                                "content": [
-                                    {"component": "VCardText", "text": f"已看集数: {stats['episode_count']}"}
+                                'component': 'VTable',
+                                'props': {'hover': True},
+                                'content': [
+                                    {
+                                        'component': 'thead',
+                                        'content': [
+                                            {
+                                                'component': 'tr',
+                                                'content': [
+                                                    {'component': 'th', 'text': h['text'], 'props': {'class': h['class']}}
+                                                    for h in movie_headers
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {'component': 'tbody', 'content': movie_rows if movie_rows else [{'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 3}}]}]}
                                 ]
                             }
                         ]
                     }
                 ]
             },
-            # 标签页切换
             {
-                "component": "VCard",
-                "props": {"class": "mt-4"},
-                "content": [
+                'component': 'VRow',
+                'content': [
                     {
-                        "component": "VTabs",
-                        "props": {"modelValue": "movies_tab"},
-                        "content": [
-                            {"component": "VTab", "props": {"value": "movies"}, "text": f"电影 ({stats['movie_count']})"},
-                            {"component": "VTab", "props": {"value": "tvshows"}, "text": f"电视剧 ({stats['tv_show_count']})"},
-                            {"component": "VTab", "props": {"value": "recent"}, "text": "最近观看"}
+                        'component': 'VCol',
+                        'props': {'cols': 12},
+                        'content': [
+                            {
+                                'component': 'VTable',
+                                'props': {'hover': True},
+                                'content': [
+                                    {
+                                        'component': 'thead',
+                                        'content': [
+                                            {
+                                                'component': 'tr',
+                                                'content': [
+                                                    {'component': 'th', 'text': h['text'], 'props': {'class': h['class']}}
+                                                    for h in tvshow_headers
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {'component': 'tbody', 'content': tvshow_rows if tvshow_rows else [{'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 2}}]}]}
+                                ]
+                            }
                         ]
-                    },
+                    }
+                ]
+            },
+            {
+                'component': 'VRow',
+                'content': [
                     {
-                        "component": "VWindow",
-                        "props": {"modelValue": "movies_tab"},
-                        "content": [
-                            # 电影列表
+                        'component': 'VCol',
+                        'props': {'cols': 12},
+                        'content': [
                             {
-                                "component": "VWindowItem",
-                                "props": {"value": "movies"},
-                                "content": self._build_movies_list_content(movies)
-                            },
-                            # 电视剧列表
-                            {
-                                "component": "VWindowItem",
-                                "props": {"value": "tvshows"},
-                                "content": self._build_tvshows_list_content(shows)
-                            },
-                            # 最近观看
-                            {
-                                "component": "VWindowItem",
-                                "props": {"value": "recent"},
-                                "content": self._build_recent_content(history)
+                                'component': 'VTable',
+                                'props': {'hover': True},
+                                'content': [
+                                    {
+                                        'component': 'thead',
+                                        'content': [
+                                            {
+                                                'component': 'tr',
+                                                'content': [
+                                                    {'component': 'th', 'text': h['text'], 'props': {'class': h['class']}}
+                                                    for h in recent_headers
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {'component': 'tbody', 'content': recent_rows if recent_rows else [{'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 3}}]}]}
+                                ]
                             }
                         ]
                     }
@@ -429,99 +504,24 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             }
         ]
 
-    def _build_movies_list_content(self, movies: List[Dict]) -> List[Dict]:
-        """构建电影列表内容"""
-        if not movies:
-            return [{"component": "VCardText", "text": "暂无观看记录"}]
-
-        items = []
-        for movie in movies:
-            items.append({
-                "component": "VListItem",
-                "props": {
-                    "title": f"🎬 {movie['title']}" + (f" ({movie['year']})" if movie.get('year') else ""),
-                    "subtitle": f"观看时间: {movie.get('watched_at', '未知')}" if movie.get('watched_at') else ""
+    def _build_stat_card(self, title: str, value: str, color: str) -> dict:
+        """构建统计卡片"""
+        return {
+            'component': 'VCol',
+            'props': {'cols': 4},
+            'content': [
+                {
+                    'component': 'VCard',
+                    'props': {'color': color},
+                    'content': [
+                        {
+                            'component': 'VCardText',
+                            'text': f"{title}: {value}"
+                        }
+                    ]
                 }
-            })
-
-        return [
-            {
-                "component": "VList",
-                "props": {"density": "compact"},
-                "content": items
-            }
-        ]
-
-    def _build_tvshows_list_content(self, shows: List[Dict]) -> List[Dict]:
-        """构建电视剧列表内容"""
-        if not shows:
-            return [{"component": "VCardText", "text": "暂无观看记录"}]
-
-        cards = []
-        for show in shows:
-            # 集数信息
-            episode_text = f"共 {len(show.get('episodes', []))} 集"
-            episodes = show.get('episodes', [])
-            if episodes:
-                # 显示前几集和最后几集
-                if len(episodes) <= 5:
-                    ep_detail = ", ".join([f"S{ep['season']:02d}E{ep['episode']:02d}" for ep in episodes])
-                else:
-                    first_eps = episodes[:3]
-                    last_eps = episodes[-2:]
-                    ep_detail = ", ".join([f"S{ep['season']:02d}E{ep['episode']:02d}" for ep in first_eps])
-                    ep_detail += " ... "
-                    ep_detail += ", ".join([f"S{ep['season']:02d}E{ep['episode']:02d}" for ep in last_eps])
-
-            cards.append({
-                "component": "VCard",
-                "props": {"class": "mb-2"},
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": f"📺 {show['title']}"
-                    },
-                    {
-                        "component": "VCardText",
-                        "text": f"{episode_text}"
-                    },
-                    {
-                        "component": "VCardText",
-                        "props": {"class": "text-caption", "style": "color: #666;"},
-                        "text": ep_detail if episodes else ""
-                    }
-                ]
-            })
-
-        return cards
-
-    def _build_recent_content(self, history: WatchHistory) -> List[Dict]:
-        """构建最近观看内容"""
-        recent = WatchTrackerUI.build_recent_watches(history, limit=20)
-
-        if not recent:
-            return [{"component": "VCardText", "text": "暂无观看记录"}]
-
-        items = []
-        for item in recent:
-            icon = "🎬" if item["type"] == "Movie" else "📺"
-            title = f"{icon} {item['title']}"
-            subtitle = f"观看时间: {item.get('watched_at', '未知')[:10]}" if item.get('watched_at') else ""
-            items.append({
-                "component": "VListItem",
-                "props": {
-                    "title": title,
-                    "subtitle": subtitle
-                }
-            })
-
-        return [
-            {
-                "component": "VList",
-                "props": {"density": "compact"},
-                "content": items
-            }
-        ]
+            ]
+        }
 
     def get_service(self) -> List[Dict[str, Any]]:
         """
