@@ -164,9 +164,9 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         """
         Get plugin running state
 
-        :return: True if plugin is configured and running
+        :return: True if plugin is loaded
         """
-        return self._emby_client is not None and self._user_id is not None
+        return True
 
     def stop_service(self) -> None:
         """Stop plugin service"""
