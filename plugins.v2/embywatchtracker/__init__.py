@@ -3,22 +3,21 @@ Emby Watch Tracker Plugin for MoviePilot V2
 
 Syncs Emby user watch history and provides watch tracking features.
 """
-import logging
 from typing import Optional, List, Dict, Any, Tuple
 
 from apscheduler.triggers.cron import CronTrigger
 
 from app.plugins import _PluginBase
 from app.schemas.types import EventType, NotificationType, MediaServerType
-from app.helper.service import ServiceConfigHelper
+from app.helper.mediaserver import MediaServerHelper
+from app.core.config import settings
+from app.log import logger
 
 from .emby_client import EmbyClient
 from .models import WatchHistory, MovieWatchRecord, TvShowWatchRecord, EpisodeWatchRecord
 from .matcher import MediaMatcher
 from .notifier import WatchTrackerNotifier
 from .ui import WatchTrackerUI
-
-logger = logging.getLogger(__name__)
 
 
 class EmbyWatchTrackerPlugin(_PluginBase):
@@ -34,6 +33,8 @@ class EmbyWatchTrackerPlugin(_PluginBase):
     plugin_version = "1.0.0"
     # 插件作者
     plugin_author = "zoffyultraman"
+    # 作者主页
+    author_url = "https://github.com/zoffyultraman"
     # 插件配置项ID前缀
     plugin_config_prefix = "embywatchtracker_"
     # 加载顺序
@@ -61,6 +62,9 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         self._enable_notification: bool = True
         self._fuzzy_threshold: float = 0.9
         self._incremental_sync: bool = True
+        self._onlyonce: bool = False
+        # Page tab state
+        self._page_tab: str = "movies"
 
     def _get_emby_servers(self) -> List[Dict[str, str]]:
         """
@@ -70,12 +74,13 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         """
         servers = []
         try:
-            configs = ServiceConfigHelper.get_mediaserver_configs()
-            for config in configs:
-                if config and config.type == MediaServerType.Emby.value:
+            # Use MediaServerHelper to get all media server configs
+            all_configs = MediaServerHelper().get_configs(include_disabled=True)
+            for name, config in all_configs.items():
+                if config.type == MediaServerType.Emby.value:
                     server_config = config.config or {}
                     servers.append({
-                        "name": config.name,
+                        "name": name,
                         "url": server_config.get("url", ""),
                         "api_key": server_config.get("api_key", "")
                     })
@@ -93,6 +98,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         if not config:
             config = self.get_config() or {}
+        logger.info(f"init_plugin received config: {config}")
 
         # Load configuration
         self._selected_server = config.get("emby_server", "")
@@ -101,6 +107,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         self._enable_notification = config.get("enable_notification", True)
         self._fuzzy_threshold = float(config.get("fuzzy_match_threshold", 0.9))
         self._incremental_sync = config.get("enable_incremental_sync", True)
+        self._onlyonce = config.get("onlyonce", False)
 
         # Auto-get server config from MoviePilot
         if not self._selected_server:
@@ -116,16 +123,34 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             return
 
         # Initialize Emby client
+        logger.info(f"Creating EmbyClient with server: {self._server_url}")
         self._emby_client = EmbyClient(
             server_url=self._server_url,
             api_key=self._api_key
         )
+        logger.info(f"EmbyClient created, testing connection...")
+        if not self._emby_client.test_connection():
+            logger.error("Emby server connection test failed")
+            return
+        logger.info("Emby server connection test passed")
 
         # Authenticate user
+        logger.info(f"Looking for user: {self._emby_username}")
         user = self._emby_client.get_user_by_name(self._emby_username)
         if not user:
             logger.error(f"Failed to find Emby user: {self._emby_username}")
             return
+        logger.info(f"Found user: name={user.username}, id={user.user_id}")
+
+        # Handle immediate sync if onlyonce is enabled
+        if self._onlyonce:
+            logger.info("Running immediate sync...")
+            self._do_sync()
+            self._onlyonce = False
+            # Reset onlyonce in config without overwriting other settings
+            current_config = self.get_config() or {}
+            current_config["onlyonce"] = False
+            self.update_config(config=current_config)
 
         self._user_id = user.user_id
         self._username = user.username
@@ -149,15 +174,23 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         :return: True if successful
         """
         try:
-            configs = ServiceConfigHelper.get_mediaserver_configs()
-            config = next((c for c in configs if c.name == server_name), None)
-            if not config or config.type != MediaServerType.Emby.value:
-                logger.warning(f"Server {server_name} is not an Emby server")
+            # Use MediaServerHelper to get server config
+            logger.info(f"Looking up server config for: {server_name}")
+            config = MediaServerHelper().get_config(server_name)
+            logger.info(f"Config result: {config}")
+            if not config:
+                logger.warning(f"Server {server_name} not found in MediaServerHelper")
+                return False
+            if config.type and config.type.lower() != "emby":
+                logger.warning(f"Server {server_name} is not an Emby server, type is: {config.type}")
                 return False
 
             server_config = config.config or {}
-            self._server_url = server_config.get("url", "").rstrip("/")
-            self._api_key = server_config.get("api_key", "")
+            logger.info(f"Server config: {server_config}")
+            # Handle both possible key names (MoviePilot uses host/apikey, not url/api_key)
+            self._server_url = server_config.get("url") or server_config.get("host", "").rstrip("/")
+            self._api_key = server_config.get("api_key") or server_config.get("apikey", "")
+            logger.info(f"Set server_url: {self._server_url}, api_key: {self._api_key[:4] if self._api_key else 'None'}...")
             return True
         except Exception as e:
             logger.error(f"Failed to use MoviePilot server: {e}")
@@ -178,116 +211,194 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             self._scheduler = None
         logger.info("Emby Watch Tracker Plugin stopped")
 
-    def get_form(self) -> Tuple[Optional[List[dict]], Dict[str, Any]]:
+    def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
         Get plugin configuration form
 
         :return: (form config, default values)
         """
-        # Get available Emby servers from MoviePilot directly
-        emby_servers = self._get_emby_servers()
-        server_items = [{"title": s["name"], "value": s["name"]} for s in emby_servers]
+        # Load config from persistent storage
+        config = self.get_config() or {}
+        logger.info(f"get_form config: {config}")
+        selected_server = config.get("emby_server", "")
+        emby_username = config.get("emby_username", "")
+        sync_interval_hours = int(config.get("sync_interval_hours", 6))
+        enable_notification = config.get("enable_notification", True)
+        fuzzy_threshold = float(config.get("fuzzy_match_threshold", 0.9))
+        enable_incremental_sync = config.get("enable_incremental_sync", True)
+        logger.info(f"get_form selected_server: {selected_server}, emby_username: {emby_username}")
+
+        # Build server items from MoviePilot media server configs
+        all_configs = MediaServerHelper().get_configs(include_disabled=True)
+        logger.info(f"All media server configs: {[c.name for c in all_configs.values()]}")
+        logger.info(f"All config types: {[c.type for c in all_configs.values()]}")
+        # Emby type check - need case insensitive comparison
+        server_items = [
+            {"title": config.name, "value": config.name}
+            for config in all_configs.values()
+            if config.type and config.type.lower() == "emby"
+        ]
+        logger.info(f"Emby server items: {server_items}")
 
         form = [
             {
-                "component": "VCard",
+                "component": "VForm",
                 "content": [
                     {
-                        "component": "VCardTitle",
-                        "text": "Emby服务器配置"
-                    },
-                    {
-                        "component": "VCardText",
+                        "component": "VRow",
                         "content": [
                             {
-                                "component": "VSelect",
-                                "props": {
-                                    "label": "选择Emby服务器",
-                                    "placeholder": "请选择MoviePilot中配置的Emby服务器",
-                                    "model": "emby_server",
-                                    "items": server_items,
-                                    "clearable": False,
-                                    "hint": "自动读取MoviePilot中已配置的Emby服务器"
-                                }
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSelect",
+                                        "props": {
+                                            "label": "选择Emby服务器",
+                                            "placeholder": "请选择MoviePilot中配置的Emby服务器",
+                                            "model": "emby_server",
+                                            "items": server_items,
+                                            "clearable": False,
+                                            "hint": "自动读取MoviePilot中已配置的Emby服务器"
+                                        }
+                                    }
+                                ]
                             },
                             {
-                                "component": "VTextField",
-                                "props": {
-                                    "label": "Emby用户名",
-                                    "placeholder": "输入要追踪的Emby用户名",
-                                    "model": "emby_username",
-                                    "clearable": True,
-                                    "hint": "输入你在Emby中登录的用户名"
-                                }
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "label": "Emby用户名",
+                                            "placeholder": "输入要追踪的Emby用户名",
+                                            "model": "emby_username",
+                                            "clearable": True,
+                                            "hint": "输入你在Emby中登录的用户名"
+                                        }
+                                    }
+                                ]
                             }
                         ]
-                    }
-                ]
-            },
-            {
-                "component": "VCard",
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": "同步设置"
                     },
                     {
-                        "component": "VCardText",
+                        "component": "VRow",
                         "content": [
                             {
-                                "component": "VSelect",
-                                "props": {
-                                    "label": "同步间隔（小时）",
-                                    "model": "sync_interval_hours",
-                                    "items": [
-                                        {"title": "1小时", "value": 1},
-                                        {"title": "3小时", "value": 3},
-                                        {"title": "6小时", "value": 6},
-                                        {"title": "12小时", "value": 12},
-                                        {"title": "24小时", "value": 24}
-                                    ]
-                                }
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSelect",
+                                        "props": {
+                                            "label": "同步间隔（小时）",
+                                            "model": "sync_interval_hours",
+                                            "items": [
+                                                {"title": "1小时", "value": 1},
+                                                {"title": "3小时", "value": 3},
+                                                {"title": "6小时", "value": 6},
+                                                {"title": "12小时", "value": 12},
+                                                {"title": "24小时", "value": 24}
+                                            ]
+                                        }
+                                    }
+                                ]
                             },
                             {
-                                "component": "VSwitch",
-                                "props": {
-                                    "label": "启用增量同步",
-                                    "model": "enable_incremental_sync",
-                                    "color": "primary"
-                                }
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "label": "启用增量同步",
+                                            "model": "enable_incremental_sync",
+                                            "color": "primary"
+                                        }
+                                    }
+                                ]
                             }
                         ]
-                    }
-                ]
-            },
-            {
-                "component": "VCard",
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": "提醒设置"
                     },
                     {
-                        "component": "VCardText",
+                        "component": "VRow",
                         "content": [
                             {
-                                "component": "VSwitch",
-                                "props": {
-                                    "label": "启用订阅提醒",
-                                    "model": "enable_notification",
-                                    "color": "primary"
-                                }
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "label": "立即同步一次",
+                                            "model": "onlyonce",
+                                            "color": "primary"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "label": "启用订阅提醒",
+                                            "model": "enable_notification",
+                                            "color": "primary"
+                                        }
+                                    }
+                                ]
                             },
                             {
-                                "component": "VSlider",
-                                "props": {
-                                    "label": "模糊匹配阈值",
-                                    "model": "fuzzy_match_threshold",
-                                    "min": 0.7,
-                                    "max": 1.0,
-                                    "step": 0.05,
-                                    "thumbLabel": True
-                                }
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSlider",
+                                        "props": {
+                                            "label": "模糊匹配阈值",
+                                            "model": "fuzzy_match_threshold",
+                                            "min": 0.7,
+                                            "max": 1.0,
+                                            "step": 0.05,
+                                            "thumbLabel": True
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VBtn",
+                                        "props": {
+                                            "color": "error",
+                                            "variant": "outlined",
+                                        },
+                                        "text": "清空历史记录",
+                                        "events": {
+                                            "click": {
+                                                "api": "plugin/EmbyWatchTracker/clear_history",
+                                                "method": "get",
+                                                "params": {"token": settings.API_TOKEN},
+                                            }
+                                        }
+                                    }
+                                ]
                             }
                         ]
                     }
@@ -296,12 +407,13 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         ]
 
         defaults = {
-            "emby_server": self._selected_server,
-            "emby_username": self._emby_username,
-            "sync_interval_hours": self._sync_interval_hours,
-            "enable_notification": self._enable_notification,
-            "fuzzy_match_threshold": self._fuzzy_threshold,
-            "enable_incremental_sync": self._incremental_sync
+            "emby_server": selected_server,
+            "emby_username": emby_username,
+            "sync_interval_hours": sync_interval_hours,
+            "enable_notification": enable_notification,
+            "fuzzy_match_threshold": fuzzy_threshold,
+            "enable_incremental_sync": enable_incremental_sync,
+            "onlyonce": False
         }
 
         return form, defaults
@@ -312,102 +424,131 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         :return: API definitions
         """
-        return []
+        logger.info("get_api called, registering endpoints")
+        return [
+            {
+                "path": "/clear_history",
+                "endpoint": self._clear_history,
+                "methods": ["GET"],
+                "summary": "清空观影历史记录",
+            },
+            {
+                "path": "/set_page_tab_movies",
+                "endpoint": self.api_set_page_tab_movies,
+                "methods": ["GET"],
+                "summary": "切换到电影标签",
+            },
+            {
+                "path": "/set_page_tab_tvshows",
+                "endpoint": self.api_set_page_tab_tvshows,
+                "methods": ["GET"],
+                "summary": "切换到电视剧标签",
+            }
+        ]
+
+    def _clear_history(self, token: str = "") -> dict:
+        """清空观影历史记录"""
+        logger.info(f"_clear_history called with token length: {len(token) if token else 0}")
+        from app.core.config import settings
+        if token != settings.API_TOKEN:
+            logger.warning("Token mismatch")
+            return {"success": False, "message": "认证失败"}
+        logger.info("Clearing history...")
+        self.save_data(self.STORAGE_KEY_HISTORY, {"movies": [], "tv_shows": [], "last_sync_time": 0})
+        logger.info("观影历史已清空")
+        return {"success": True, "message": "历史已清空"}
+
+    def api_set_page_tab_movies(self) -> dict:
+        """切换到电影标签"""
+        self._page_tab = "movies"
+        return {"code": 0, "msg": "已切换到电影"}
+
+    def api_set_page_tab_tvshows(self) -> dict:
+        """切换到电视剧标签"""
+        self._page_tab = "tvshows"
+        return {"code": 0, "msg": "已切换到电视剧"}
 
     def get_page(self) -> List[dict]:
         """
         拼装插件详情页面
         """
-        history = self._load_history()
+        logger.info("get_page called")
+        try:
+            history = self._load_history()
+            logger.info(f"history loaded: {len(history.movies)} movies, {len(history.tv_shows)} tvshows")
+        except Exception as e:
+            logger.error(f"_load_history error: {e}")
+            history = None
 
         # 计算统计数据
-        movie_count = len(history.movies)
-        tvshow_count = len(history.tv_shows)
-        episode_count = sum(len(tv.episodes) for tv in history.tv_shows)
-
-        # 统计卡片
-        stat_cards = [
-            {
-                'component': 'VCard',
-                'props': {'color': 'primary', 'class': 'pa-2'},
-                'content': [
-                    {'component': 'VCardText', 'text': f"电影: {movie_count}"}
-                ]
-            },
-            {
-                'component': 'VCard',
-                'props': {'color': 'success', 'class': 'pa-2'},
-                'content': [
-                    {'component': 'VCardText', 'text': f"电视剧: {tvshow_count}"}
-                ]
-            },
-            {
-                'component': 'VCard',
-                'props': {'color': 'info', 'class': 'pa-2'},
-                'content': [
-                    {'component': 'VCardText', 'text': f"已看剧集: {episode_count}"}
-                ]
-            }
-        ]
+        movie_count = len(history.movies) if history else 0
+        tvshow_count = len(history.tv_shows) if history else 0
+        episode_count = sum(len(tv.episodes) for tv in history.tv_shows) if history else 0
 
         # 电影表格
         movie_rows = []
-        for movie in history.movies:
-            movie_rows.append({
-                'component': 'tr',
-                'content': [
-                    {'component': 'td', 'text': movie.name},
-                    {'component': 'td', 'text': str(movie.year) if movie.year else '-'},
-                    {'component': 'td', 'text': movie.watched_at[:10] if movie.watched_at else '-'}
-                ]
-            })
-
-        # 电视剧表格
-        tvshow_rows = []
-        for show in history.tv_shows:
-            tvshow_rows.append({
-                'component': 'tr',
-                'content': [
-                    {'component': 'td', 'text': show.series_name},
-                    {'component': 'td', 'text': str(len(show.episodes))}
-                ]
-            })
-
-        # 最近观看
-        recent_items = []
-        for movie in sorted(history.movies, key=lambda x: x.watched_at or "", reverse=True)[:5]:
-            recent_items.append({
-                'type': 'Movie',
-                'title': movie.name,
-                'watched_at': movie.watched_at
-            })
-        for show in history.tv_shows:
-            for ep in sorted(show.episodes, key=lambda x: x.watched_at or "", reverse=True)[:2]:
-                recent_items.append({
-                    'type': 'TV',
-                    'title': f"{show.series_name} S{ep.season:02d}E{ep.episode:02d}",
-                    'watched_at': ep.watched_at
+        if history:
+            for movie in history.movies:
+                movie_rows.append({
+                    'component': 'tr',
+                    'content': [
+                        {'component': 'td', 'text': movie.name}
+                    ]
                 })
-        recent_items.sort(key=lambda x: x['watched_at'] or "", reverse=True)
-        recent_items = recent_items[:10]
 
-        recent_rows = []
-        for item in recent_items:
-            icon = "🎬" if item['type'] == 'Movie' else "📺"
-            recent_rows.append({
-                'component': 'tr',
-                'content': [
-                    {'component': 'td', 'text': icon},
-                    {'component': 'td', 'text': item['title']},
-                    {'component': 'td', 'text': item['watched_at'][:10] if item['watched_at'] else '-'}
-                ]
-            })
+        # 电视剧表格 - 格式化为 S01: 1-3,5-8 | S02: 9-13 形式
+        def format_season_episodes(episodes):
+            """将剧集合并为季别格式，处理不连续的集数"""
+            from collections import defaultdict
+            # 按季分组
+            seasons = defaultdict(list)
+            for ep in episodes:
+                if ep.season is not None:
+                    seasons[ep.season].append(ep.episode)
 
-        return [
-            {
-                'component': 'VRow',
-                'content': stat_cards
-            },
+            # 生成格式字符串
+            parts = []
+            for season in sorted(seasons.keys()):
+                eps = sorted(set(seasons[season]))
+                if len(eps) == 1:
+                    parts.append(f"S{season:02d}: {eps[0]}")
+                else:
+                    # 找出连续的范围
+                    ranges = []
+                    start = eps[0]
+                    end = eps[0]
+                    for i in range(1, len(eps)):
+                        if eps[i] == end + 1:
+                            end = eps[i]
+                        else:
+                            if start == end:
+                                ranges.append(f"{start}")
+                            else:
+                                ranges.append(f"{start}-{end}")
+                            start = eps[i]
+                            end = eps[i]
+                    # 处理最后一个范围
+                    if start == end:
+                        ranges.append(f"{start}")
+                    else:
+                        ranges.append(f"{start}-{end}")
+                    parts.append(f"S{season:02d}: {','.join(ranges)}")
+            return " | ".join(parts)
+
+        tvshow_rows = []
+        if history:
+            for show in history.tv_shows:
+                episode_format = format_season_episodes(show.episodes)
+                tvshow_rows.append({
+                    'component': 'tr',
+                    'content': [
+                        {'component': 'td', 'text': show.series_name},
+                        {'component': 'td', 'text': episode_format}
+                    ]
+                })
+
+        # 电影表格内容
+        movies_content = [
             {
                 'component': 'VTable',
                 'props': {'hover': True, 'class': 'mt-4'},
@@ -418,9 +559,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                             {
                                 'component': 'tr',
                                 'content': [
-                                    {'component': 'th', 'text': '电影名称'},
-                                    {'component': 'th', 'text': '年份'},
-                                    {'component': 'th', 'text': '观看时间'}
+                                    {'component': 'th', 'text': '电影名称'}
                                 ]
                             }
                         ]
@@ -428,11 +567,15 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                     {
                         'component': 'tbody',
                         'content': movie_rows if movie_rows else [
-                            {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 3}}]}
+                            {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 1}}]}
                         ]
                     }
                 ]
-            },
+            }
+        ]
+
+        # 电视剧表格内容
+        tvshows_content = [
             {
                 'component': 'VTable',
                 'props': {'hover': True, 'class': 'mt-4'},
@@ -444,7 +587,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                                 'component': 'tr',
                                 'content': [
                                     {'component': 'th', 'text': '剧集名称'},
-                                    {'component': 'th', 'text': '已看集数'}
+                                    {'component': 'th', 'text': '观看集数'}
                                 ]
                             }
                         ]
@@ -456,28 +599,65 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         ]
                     }
                 ]
-            },
+            }
+        ]
+
+        # 根据当前标签返回不同内容
+        if self._page_tab == "movies":
+            current_window_item = {
+                'component': 'VWindowItem',
+                'props': {'value': 'movies'},
+                'content': movies_content
+            }
+        else:
+            current_window_item = {
+                'component': 'VWindowItem',
+                'props': {'value': 'tvshows'},
+                'content': tvshows_content
+            }
+
+        return [
             {
-                'component': 'VTable',
-                'props': {'hover': True, 'class': 'mt-4'},
+                'component': 'VForm',
                 'content': [
                     {
-                        'component': 'thead',
+                        'component': 'VTabs',
+                        'props': {
+                            'modelValue': self._page_tab,
+                            'style': {
+                                'margin-top': '8px',
+                                'margin-bottom': '16px'
+                            },
+                            'stacked': True,
+                            'fixed-tabs': True
+                        },
                         'content': [
                             {
-                                'component': 'tr',
-                                'content': [
-                                    {'component': 'th', 'text': '类型'},
-                                    {'component': 'th', 'text': '名称'},
-                                    {'component': 'th', 'text': '观看时间'}
-                                ]
+                                'component': 'VTab',
+                                'props': {'value': 'movies'},
+                                'text': f"电影 ({movie_count})",
+                                'events': {'click': {'api': 'plugin/EmbyWatchTracker/set_page_tab_movies', 'method': 'get'}}
+                            },
+                            {
+                                'component': 'VTab',
+                                'props': {'value': 'tvshows'},
+                                'text': f"电视剧 ({tvshow_count})",
+                                'events': {'click': {'api': 'plugin/EmbyWatchTracker/set_page_tab_tvshows', 'method': 'get'}}
                             }
                         ]
                     },
                     {
-                        'component': 'tbody',
-                        'content': recent_rows if recent_rows else [
-                            {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 3}}]}
+                        'component': 'VWindow',
+                        'props': {'modelValue': self._page_tab},
+                        'content': [
+                            current_window_item
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+                            }
                         ]
                     }
                 ]
@@ -581,11 +761,17 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             return 0, 0
 
         logger.info("Starting Emby watch history sync")
+        logger.info(f"User ID: {self._user_id}")
 
         try:
             history = self._load_history()
+            logger.info("Fetching movies...")
             movies = self._emby_client.get_watched_movies(self._user_id)
+            logger.info(f"Movies fetched: {movies}")
+
+            logger.info("Fetching episodes...")
             episodes = self._emby_client.get_watched_episodes(self._user_id)
+            logger.info(f"Episodes fetched: {episodes}")
 
             if movies is None:
                 logger.error("Failed to fetch movies from Emby")
@@ -594,6 +780,8 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             if episodes is None:
                 logger.error("Failed to fetch episodes from Emby")
                 return 0, 0
+
+            logger.info(f"Movies count: {len(movies)}, Episodes count: {len(episodes)}")
 
             movies_added = 0
             episodes_added = 0

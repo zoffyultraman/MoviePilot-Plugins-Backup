@@ -54,6 +54,7 @@ class EmbyItem:
     name: str
     type: str
     series_name: Optional[str] = None
+    series_id: Optional[str] = None
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
     year: Optional[int] = None

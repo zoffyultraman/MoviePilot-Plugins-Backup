@@ -25,7 +25,7 @@ class EmbyClient:
         self._username: Optional[str] = None
 
     def _request(self, method: str, endpoint: str, timeout: int = 30,
-                 retries: int = 3) -> Optional[Any]:
+                 retries: int = 3, params: dict = None) -> Optional[Any]:
         """
         Make API request with timeout and retry
 
@@ -33,15 +33,22 @@ class EmbyClient:
         :param endpoint: API endpoint
         :param timeout: Request timeout in seconds
         :param retries: Number of retries
+        :param params: Query parameters
         :return: Response JSON or None
         """
         url = f"{self.server_url}{endpoint}"
+        # Add api_key to params
+        if params is None:
+            params = {}
+        params["api_key"] = self.api_key
+        logger.info(f"Emby API request: {method} {url} params={params}")
         last_error = None
 
         for attempt in range(retries):
             try:
-                response = self.session.request(method, url, timeout=timeout)
+                response = self.session.request(method, url, timeout=timeout, params=params)
                 response.raise_for_status()
+                logger.info(f"Emby API response: {response.status_code}")
                 return response.json()
             except requests.exceptions.Timeout:
                 last_error = f"Request timeout after {timeout}s"
@@ -61,8 +68,10 @@ class EmbyClient:
         """
         data = self._request("GET", "/Users")
         if not data:
+            logger.error("No data returned from /Users endpoint")
             return None
 
+        logger.info(f"Emby /Users returned: {data}")
         users = []
         for user in data:
             users.append(EmbyUser(
@@ -80,8 +89,10 @@ class EmbyClient:
         """
         users = self.get_users()
         if not users:
+            logger.error(f"No users returned from Emby server")
             return None
 
+        logger.info(f"Looking for user '{username}', available users: {[u.username for u in users]}")
         for user in users:
             if user.username.lower() == username.lower():
                 return user
@@ -103,16 +114,20 @@ class EmbyClient:
         """
         endpoint = f"/Users/{user_id}/Items"
         params = {
-            "Filters": filters,
+            "IsPlayed": "true",
             "Recursive": "true",
+            "IncludeItemTypes": "Movie,Episode",
             "Fields": "ItemIds,Name,Type,SeriesName,SeasonNumber,EpisodeNumber,Year,UserData"
         }
-
+        logger.info(f"Fetching watched items for user {user_id}")
         data = self._request("GET", endpoint, params=params)
         if not data:
+            logger.error("No data returned from get_watched_items")
             return None
 
-        return data.get("Items", [])
+        items = data.get("Items", [])
+        logger.info(f"get_watched_items returned {len(items)} items")
+        return items
 
     def get_watched_movies(self, user_id: str) -> List[EmbyItem]:
         """
@@ -159,8 +174,9 @@ class EmbyClient:
                     name=item.get("Name", ""),
                     type="Episode",
                     series_name=item.get("SeriesName"),
-                    season_number=item.get("SeasonNumber"),
-                    episode_number=item.get("EpisodeNumber"),
+                    series_id=item.get("SeriesId"),
+                    season_number=item.get("ParentIndexNumber"),
+                    episode_number=item.get("IndexNumber"),
                     played=user_data.get("Played", False),
                     last_played_date=user_data.get("LastPlayedDate")
                 ))
@@ -172,5 +188,10 @@ class EmbyClient:
 
         :return: True if connection successful
         """
+        logger.info("Testing Emby connection...")
         data = self._request("GET", "/System/Info")
-        return data is not None
+        if data is None:
+            logger.error("Emby connection test returned no data")
+            return False
+        logger.info(f"Emby connection test passed: {data.get('ServerName', 'unknown')}")
+        return True
