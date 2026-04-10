@@ -6,6 +6,9 @@
     "version": "1.0.0",
     "icon": "emby.png",
     "author": "MoviePilot Plugin Developer",
-    "level": 1
+    "level": 1,
+    "history": {
+      "v1.0.0": "初始版本"
+    }
   }
 }
