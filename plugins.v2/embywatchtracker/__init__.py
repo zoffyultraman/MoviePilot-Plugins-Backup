@@ -24,12 +24,19 @@ logger = logging.getLogger(__name__)
 class EmbyWatchTrackerPlugin(_PluginBase):
     """Emby Watch Tracker Plugin for MoviePilot V2"""
 
-    # Plugin metadata
+    # 插件名称
     plugin_name = "Emby观影追踪"
-    plugin_version = "1.0.0"
-    plugin_icon = "emby.png"
+    # 插件描述
     plugin_desc = "同步Emby用户观影记录，在MoviePilot中展示已观看媒体"
+    # 插件图标
+    plugin_icon = "emby.png"
+    # 插件版本
+    plugin_version = "1.0.0"
+    # 插件作者
     plugin_author = "zoffyultraman"
+    # 插件配置项ID前缀
+    plugin_config_prefix = "embywatchtracker_"
+    # 加载顺序
     plugin_order = 9999
     # 可使用的用户级别，1为所有用户可见，2为仅认证用户可见
     auth_level = 1
