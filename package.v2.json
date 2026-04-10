@@ -1,0 +1,11 @@
+{
+  "EmbyWatchTracker": {
+    "name": "Emby观影追踪",
+    "description": "同步Emby用户观影记录，在MoviePilot中展示已观看媒体并支持订阅提醒",
+    "labels": "媒体服务器,Emby,观影记录",
+    "version": "1.0.0",
+    "icon": "emby.png",
+    "author": "MoviePilot Plugin Developer",
+    "level": 1
+  }
+}
