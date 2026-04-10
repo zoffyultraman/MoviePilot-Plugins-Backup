@@ -4,7 +4,7 @@
     "description": "同步Emby用户观影记录，在MoviePilot中展示已观看媒体并支持订阅提醒",
     "labels": "媒体服务器,Emby,观影记录",
     "version": "1.0.0",
-    "icon": "emby.png",
+    "icon": "https://raw.githubusercontent.com/zoffyultraman/MoviePilot-Plugins-Backup/main/icons/emby.png",
     "author": "zoffyultraman",
     "level": 1,
     "history": {
