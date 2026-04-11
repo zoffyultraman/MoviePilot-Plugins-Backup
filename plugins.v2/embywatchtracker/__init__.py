@@ -63,6 +63,8 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         self._fuzzy_threshold: float = 0.9
         self._incremental_sync: bool = True
         self._onlyonce: bool = False
+        # Page tab state
+        self._page_tab: str = "movies"
 
     def _get_emby_servers(self) -> List[Dict[str, str]]:
         """
@@ -422,7 +424,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         :return: API definitions
         """
-        logger.info("get_api called, registering clear_history endpoint")
+        logger.info("get_api called, registering endpoints")
         return [
             {
                 "path": "/clear_history",
@@ -430,6 +432,20 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 "auth": "bear",
                 "methods": ["GET"],
                 "summary": "清空观影历史记录",
+            },
+            {
+                "path": "/set_page_tab_movies",
+                "endpoint": self.api_set_page_tab_movies,
+                "auth": "bear",
+                "methods": ["POST"],
+                "summary": "切换到电影标签",
+            },
+            {
+                "path": "/set_page_tab_tvshows",
+                "endpoint": self.api_set_page_tab_tvshows,
+                "auth": "bear",
+                "methods": ["POST"],
+                "summary": "切换到电视剧标签",
             }
         ]
 
@@ -445,11 +461,38 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         logger.info("观影历史已清空")
         return {"success": True, "message": "历史已清空"}
 
+    def api_set_page_tab_movies(self) -> dict:
+        """切换到电影标签"""
+        logger.info("api_set_page_tab_movies 被调用")
+        self._page_tab = "movies"
+        # 持久化到配置
+        config = self.get_config() or {}
+        config["page_tab"] = "movies"
+        self.update_config(config=config)
+        logger.info(f"api_set_page_tab_movies: 已保存 page_tab=movies")
+        return {"code": 0, "msg": "已切换到电影"}
+
+    def api_set_page_tab_tvshows(self) -> dict:
+        """切换到电视剧标签"""
+        logger.info("api_set_page_tab_tvshows 被调用")
+        self._page_tab = "tvshows"
+        # 持久化到配置
+        config = self.get_config() or {}
+        config["page_tab"] = "tvshows"
+        self.update_config(config=config)
+        logger.info(f"api_set_page_tab_tvshows: 已保存 page_tab=tvshows")
+        return {"code": 0, "msg": "已切换到电视剧"}
+
     def get_page(self) -> List[dict]:
         """
         拼装插件详情页面
         """
         logger.info("get_page called")
+        # 从配置读取当前标签
+        config = self.get_config() or {}
+        self._page_tab = config.get("page_tab", "movies")
+        logger.info(f"get_page: 当前标签为 {self._page_tab}")
+
         try:
             history = self._load_history()
             logger.info(f"history loaded: {len(history.movies)} movies, {len(history.tv_shows)} tvshows")
@@ -524,95 +567,99 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                     ]
                 })
 
+        # 电影表格
+        movies_table = {
+            'component': 'VTable',
+            'props': {'hover': True, 'class': 'mt-4'},
+            'content': [
+                {
+                    'component': 'thead',
+                    'content': [
+                        {
+                            'component': 'tr',
+                            'content': [
+                                {'component': 'th', 'text': '电影名称'}
+                            ]
+                        }
+                    ]
+                },
+                {
+                    'component': 'tbody',
+                    'content': movie_rows if movie_rows else [
+                        {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 1}}]}
+                    ]
+                }
+            ]
+        }
+
+        # 电视剧表格
+        tvshows_table = {
+            'component': 'VTable',
+            'props': {'hover': True, 'class': 'mt-4'},
+            'content': [
+                {
+                    'component': 'thead',
+                    'content': [
+                        {
+                            'component': 'tr',
+                            'content': [
+                                {'component': 'th', 'text': '剧集名称'},
+                                {'component': 'th', 'text': '观看集数'}
+                            ]
+                        }
+                    ]
+                },
+                {
+                    'component': 'tbody',
+                    'content': tvshow_rows if tvshow_rows else [
+                        {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 2}}]}
+                    ]
+                }
+            ]
+        }
+
         return [
             {
-                'component': 'VTabs',
-                'props': {
-                    'model': '_tabs',
-                    'style': {
-                        'margin-top': '8px',
-                        'margin-bottom': '16px'
-                    },
-                    'stacked': True,
-                    'fixed-tabs': True
-                },
+                'component': 'div',
+                'props': {'class': 'd-flex gap-2 mb-4'},
                 'content': [
                     {
-                        'component': 'VTab',
-                        'props': {'value': 'movies'},
-                        'text': f"电影 ({movie_count})"
+                        'component': 'VBtn',
+                        'props': {
+                            'color': 'primary' if self._page_tab == 'movies' else 'default',
+                            'variant': 'flat' if self._page_tab == 'movies' else 'outlined',
+                        },
+                        'text': f"电影 ({movie_count})",
+                        'events': {'click': {'api': 'plugin/EmbyWatchTracker/set_page_tab_movies', 'method': 'post'}}
                     },
                     {
-                        'component': 'VTab',
-                        'props': {'value': 'tvshows'},
-                        'text': f"电视剧 ({tvshow_count})"
+                        'component': 'VBtn',
+                        'props': {
+                            'color': 'primary' if self._page_tab == 'tvshows' else 'default',
+                            'variant': 'flat' if self._page_tab == 'tvshows' else 'outlined',
+                        },
+                        'text': f"电视剧 ({tvshow_count})",
+                        'events': {'click': {'api': 'plugin/EmbyWatchTracker/set_page_tab_tvshows', 'method': 'post'}}
                     }
                 ]
             },
             {
                 'component': 'VWindow',
-                'props': {'model': '_tabs'},
+                'props': {'modelValue': self._page_tab},
                 'content': [
                     {
                         'component': 'VWindowItem',
                         'props': {'value': 'movies'},
-                        'content': [
-                            {
-                                'component': 'VTable',
-                                'props': {'hover': True, 'class': 'mt-4'},
-                                'content': [
-                                    {
-                                        'component': 'thead',
-                                        'content': [
-                                            {
-                                                'component': 'tr',
-                                                'content': [
-                                                    {'component': 'th', 'text': '电影名称'}
-                                                ]
-                                            }
-                                        ]
-                                    },
-                                    {
-                                        'component': 'tbody',
-                                        'content': movie_rows if movie_rows else [
-                                            {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 1}}]}
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
+                        'content': [movies_table]
                     },
                     {
                         'component': 'VWindowItem',
                         'props': {'value': 'tvshows'},
-                        'content': [
-                            {
-                                'component': 'VTable',
-                                'props': {'hover': True, 'class': 'mt-4'},
-                                'content': [
-                                    {
-                                        'component': 'thead',
-                                        'content': [
-                                            {
-                                                'component': 'tr',
-                                                'content': [
-                                                    {'component': 'th', 'text': '剧集名称'},
-                                                    {'component': 'th', 'text': '观看集数'}
-                                                ]
-                                            }
-                                        ]
-                                    },
-                                    {
-                                        'component': 'tbody',
-                                        'content': tvshow_rows if tvshow_rows else [
-                                            {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 2}}]}
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
+                        'content': [tvshows_table]
                     }
                 ]
+            }
+        ]
             }
         ]
 
