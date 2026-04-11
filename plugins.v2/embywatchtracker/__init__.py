@@ -472,7 +472,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
     def _clear_history(self) -> dict:
         """清空观影历史记录"""
         logger.info("Clearing history...")
-        self.save_data(self.STORAGE_KEY_HISTORY, {"movies": [], "tv_shows": [], "last_sync_time": 0})
+        self.del_data(self.STORAGE_KEY_HISTORY)
         logger.info("观影历史已清空")
         return {"success": True, "message": "历史已清空"}
 
@@ -664,6 +664,27 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         ]
                     },
                     {'component': 'VDivider'},
+                    {
+                        'component': 'div',
+                        'props': {'class': 'd-flex justify-end mt-2'},
+                        'content': [
+                            {
+                                'component': 'VBtn',
+                                'props': {
+                                    'color': 'error',
+                                    'variant': 'outlined',
+                                    'size': 'small'
+                                },
+                                'text': '清空历史记录',
+                                'events': {
+                                    'click': {
+                                        'api': 'plugin/EmbyWatchTrackerPlugin/clear_history',
+                                        'method': 'post'
+                                    }
+                                }
+                            }
+                        ]
+                    }
                 ],
             },
         ] + (
@@ -793,6 +814,10 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             episodes_added = 0
             existing_movie_ids = {m.id for m in history.movies}
 
+            # 调试：打印所有要处理的 episodes
+            for ep in episodes:
+                logger.info(f"DEBUG episode: id={ep.id}, series={ep.series_name}, S{ep.season_number}E{ep.episode_number}")
+
             for movie_item in movies:
                 if movie_item.played and movie_item.id not in existing_movie_ids:
                     history.movies.append(MovieWatchRecord(
@@ -803,7 +828,12 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                     ))
                     movies_added += 1
 
-            for episode_item in episodes:
+            # 用 series_id 作为 key 来组织 episodes
+            # series_id -> TvShowWatchRecord
+            series_map = {tv.series_id: tv for tv in history.tv_shows}
+            logger.info(f"DEBUG series_map initial keys: {list(series_map.keys())}")
+
+            for idx, episode_item in enumerate(episodes):
                 if episode_item.played:
                     episode_record = EpisodeWatchRecord(
                         id=episode_item.id,
@@ -813,27 +843,44 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         watched_at=episode_item.last_played_date
                     )
 
-                    series_name = episode_item.series_name or "Unknown Series"
+                    # 获取 series 信息
+                    series_id = episode_item.series_id
+                    series_name = (episode_item.series_name or "Unknown Series").strip()
+                    logger.info(f"DEBUG[{idx}] episode: series={series_name}, series_id={repr(series_id)}, S{episode_record.season}E{episode_record.episode}, ep_id={episode_record.id}")
+                    logger.info(f"DEBUG[{idx}] series_map keys before: {list(series_map.keys())}")
+
+                    # 按 id 去重（检查是否已处理过这个 episode）
                     found = False
                     for tv_show in history.tv_shows:
-                        if tv_show.series_name == series_name:
-                            for existing_ep in tv_show.episodes:
-                                if (existing_ep.season == episode_record.season and
-                                        existing_ep.episode == episode_record.episode):
-                                    found = True
-                                    break
-                            if not found:
-                                tv_show.episodes.append(episode_record)
-                                episodes_added += 1
+                        for existing_ep in tv_show.episodes:
+                            if existing_ep.id == episode_record.id:
+                                found = True
+                                logger.info(f"DEBUG[{idx}]: id duplicate found in {tv_show.series_name}")
+                                break
+                        if found:
                             break
 
-                    if not found:
-                        history.tv_shows.append(TvShowWatchRecord(
-                            series_name=series_name,
-                            series_id=None,
-                            episodes=[episode_record]
-                        ))
+                    if found:
+                        continue
+
+                    # 用 series_id 查找或创建 series
+                    logger.info(f"DEBUG[{idx}]: checking series_id={repr(series_id)} in series_map, result={series_id in series_map}")
+                    if series_id in series_map:
+                        # series 已存在，添加 episode
+                        series_map[series_id].episodes.append(episode_record)
                         episodes_added += 1
+                        logger.info(f"DEBUG[{idx}]: added to existing series {series_name}")
+                    else:
+                        # 创建新 series
+                        new_series = TvShowWatchRecord(
+                            series_name=series_name,
+                            series_id=series_id,
+                            episodes=[episode_record]
+                        )
+                        history.tv_shows.append(new_series)
+                        series_map[series_id] = new_series
+                        episodes_added += 1
+                        logger.info(f"DEBUG[{idx}]: created new series {series_name}")
 
             history.last_sync_time = int(__import__("time").time())
             self._save_history(history)

@@ -141,11 +141,16 @@ class EmbyClient:
             return []
 
         movies = []
+        seen_ids = set()
         for item in raw_items:
             if item.get("Type") == "Movie":
+                movie_id = item.get("Id", "")
+                if movie_id in seen_ids:
+                    continue
+                seen_ids.add(movie_id)
                 user_data = item.get("UserData", {})
                 movies.append(EmbyItem(
-                    id=item.get("Id", ""),
+                    id=movie_id,
                     name=item.get("Name", ""),
                     type="Movie",
                     year=item.get("ProductionYear"),
@@ -166,11 +171,17 @@ class EmbyClient:
             return []
 
         episodes = []
+        seen_ids = set()
         for item in raw_items:
             if item.get("Type") == "Episode":
+                episode_id = item.get("Id", "")
+                # 按id去重
+                if episode_id in seen_ids:
+                    continue
+                seen_ids.add(episode_id)
                 user_data = item.get("UserData", {})
                 episodes.append(EmbyItem(
-                    id=item.get("Id", ""),
+                    id=episode_id,
                     name=item.get("Name", ""),
                     type="Episode",
                     series_name=item.get("SeriesName"),
