@@ -28,7 +28,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
     # 插件描述
     plugin_desc = "同步Emby用户观影记录，在MoviePilot中展示已观看媒体"
     # 插件图标
-    plugin_icon = "emby.png"
+    plugin_icon = "https://raw.githubusercontent.com/zoffyultraman/MoviePilot-Plugins-Backup/main/icons/emby.png"
     # 插件版本
     plugin_version = "1.0.0"
     # 插件作者
@@ -392,9 +392,8 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                                         "text": "清空历史记录",
                                         "events": {
                                             "click": {
-                                                "api": "plugin/EmbyWatchTracker/clear_history",
-                                                "method": "get",
-                                                "params": {"token": settings.API_TOKEN},
+                                                "api": "plugin/EmbyWatchTrackerPlugin/clear_history",
+                                                "method": "post"
                                             }
                                         }
                                     }
@@ -430,8 +429,15 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 "path": "/clear_history",
                 "endpoint": self._clear_history,
                 "auth": "bear",
-                "methods": ["GET"],
+                "methods": ["POST"],
                 "summary": "清空观影历史记录",
+            },
+            {
+                "path": "clear_history",
+                "endpoint": self._clear_history,
+                "auth": "bear",
+                "methods": ["POST"],
+                "summary": "清空观影历史记录(兼容)",
             },
             {
                 "path": "/set_page_tab_movies",
@@ -441,47 +447,61 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 "summary": "切换到电影标签",
             },
             {
+                "path": "set_page_tab_movies",
+                "endpoint": self.api_set_page_tab_movies,
+                "auth": "bear",
+                "methods": ["POST"],
+                "summary": "切换到电影标签(兼容)",
+            },
+            {
                 "path": "/set_page_tab_tvshows",
                 "endpoint": self.api_set_page_tab_tvshows,
                 "auth": "bear",
                 "methods": ["POST"],
                 "summary": "切换到电视剧标签",
+            },
+            {
+                "path": "set_page_tab_tvshows",
+                "endpoint": self.api_set_page_tab_tvshows,
+                "auth": "bear",
+                "methods": ["POST"],
+                "summary": "切换到电视剧标签(兼容)",
             }
         ]
 
-    def _clear_history(self, token: str = "") -> dict:
+    def _clear_history(self) -> dict:
         """清空观影历史记录"""
-        logger.info(f"_clear_history called with token length: {len(token) if token else 0}")
-        from app.core.config import settings
-        if token != settings.API_TOKEN:
-            logger.warning("Token mismatch")
-            return {"success": False, "message": "认证失败"}
         logger.info("Clearing history...")
         self.save_data(self.STORAGE_KEY_HISTORY, {"movies": [], "tv_shows": [], "last_sync_time": 0})
         logger.info("观影历史已清空")
         return {"success": True, "message": "历史已清空"}
 
-    def api_set_page_tab_movies(self) -> dict:
-        """切换到电影标签"""
-        logger.info("api_set_page_tab_movies 被调用")
-        self._page_tab = "movies"
+    def api_set_page_tab(self, tab: str = "") -> dict:
+        """切换页面标签"""
+        logger.info(f"api_set_page_tab 被调用，tab={tab}")
+        if tab not in ["movies", "tvshows"]:
+            tab = "movies"
+        self._page_tab = tab
         # 持久化到配置
         config = self.get_config() or {}
-        config["page_tab"] = "movies"
+        config["page_tab"] = tab
         self.update_config(config=config)
-        logger.info(f"api_set_page_tab_movies: 已保存 page_tab=movies")
-        return {"code": 0, "msg": "已切换到电影"}
+        logger.info(f"api_set_page_tab: 已保存 page_tab={tab}")
+        return {"code": 0, "msg": f"已切换到{tab}"}
+
+    def api_set_page_tab_movies(self) -> dict:
+        """切换到电影标签"""
+        logger.info("=== api_set_page_tab_movies 开始 ===")
+        result = self.api_set_page_tab("movies")
+        logger.info(f"=== api_set_page_tab_movies 返回: {result} ===")
+        return result
 
     def api_set_page_tab_tvshows(self) -> dict:
         """切换到电视剧标签"""
-        logger.info("api_set_page_tab_tvshows 被调用")
-        self._page_tab = "tvshows"
-        # 持久化到配置
-        config = self.get_config() or {}
-        config["page_tab"] = "tvshows"
-        self.update_config(config=config)
-        logger.info(f"api_set_page_tab_tvshows: 已保存 page_tab=tvshows")
-        return {"code": 0, "msg": "已切换到电视剧"}
+        logger.info("=== api_set_page_tab_tvshows 开始 ===")
+        result = self.api_set_page_tab("tvshows")
+        logger.info(f"=== api_set_page_tab_tvshows 返回: {result} ===")
+        return result
 
     def get_page(self) -> List[dict]:
         """
@@ -620,48 +640,35 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         return [
             {
-                'component': 'div',
-                'props': {'class': 'd-flex gap-2 mb-4'},
+                'component': 'VCard',
                 'content': [
                     {
-                        'component': 'VBtn',
+                        'component': 'VTabs',
                         'props': {
-                            'color': 'primary' if self._page_tab == 'movies' else 'default',
-                            'variant': 'flat' if self._page_tab == 'movies' else 'outlined',
+                            'modelValue': self._page_tab,
+                            'grow': True
                         },
-                        'text': f"电影 ({movie_count})",
-                        'events': {'click': {'api': 'plugin/EmbyWatchTracker/set_page_tab_movies', 'method': 'post'}}
+                        'content': [
+                            {
+                                'component': 'VTab',
+                                'props': {'value': 'movies'},
+                                'text': f"电影 ({movie_count})",
+                                'events': {'click': {'api': 'plugin/EmbyWatchTrackerPlugin/set_page_tab_movies', 'method': 'post'}}
+                            },
+                            {
+                                'component': 'VTab',
+                                'props': {'value': 'tvshows'},
+                                'text': f"电视剧 ({tvshow_count})",
+                                'events': {'click': {'api': 'plugin/EmbyWatchTrackerPlugin/set_page_tab_tvshows', 'method': 'post'}}
+                            }
+                        ]
                     },
-                    {
-                        'component': 'VBtn',
-                        'props': {
-                            'color': 'primary' if self._page_tab == 'tvshows' else 'default',
-                            'variant': 'flat' if self._page_tab == 'tvshows' else 'outlined',
-                        },
-                        'text': f"电视剧 ({tvshow_count})",
-                        'events': {'click': {'api': 'plugin/EmbyWatchTracker/set_page_tab_tvshows', 'method': 'post'}}
-                    }
-                ]
+                    {'component': 'VDivider'},
+                ],
             },
-            {
-                'component': 'VWindow',
-                'props': {'modelValue': self._page_tab},
-                'content': [
-                    {
-                        'component': 'VWindowItem',
-                        'props': {'value': 'movies'},
-                        'content': [movies_table]
-                    },
-                    {
-                        'component': 'VWindowItem',
-                        'props': {'value': 'tvshows'},
-                        'content': [tvshows_table]
-                    }
-                ]
-            }
-        ]
-            }
-        ]
+        ] + (
+            [movies_table] if self._page_tab == "movies" else [tvshows_table]
+        )
 
     def get_service(self) -> List[Dict[str, Any]]:
         """
