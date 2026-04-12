@@ -19,6 +19,7 @@ class MovieWatchRecord:
     name: str
     year: Optional[int] = None
     watched_at: Optional[str] = None
+    image_id: Optional[str] = None
 
 
 @dataclass
@@ -37,6 +38,7 @@ class TvShowWatchRecord:
     series_name: str
     series_id: Optional[str] = None
     episodes: List[EpisodeWatchRecord] = field(default_factory=list)
+    image_id: Optional[str] = None
 
 
 @dataclass
@@ -60,3 +62,4 @@ class EmbyItem:
     year: Optional[int] = None
     played: bool = False
     last_played_date: Optional[str] = None
+    image_id: Optional[str] = None

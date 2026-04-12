@@ -529,11 +529,31 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         movie_rows = []
         if history:
             for movie in history.movies:
+                image_url = None
+                if movie.image_id and self._emby_client:
+                    image_url = self._emby_client.get_image_url(movie.image_id, "Primary")
+                row_content = []
+                if image_url:
+                    row_content.append({
+                        'component': 'td',
+                        'props': {'style': 'width: 50px; padding: 8px;'},
+                        'content': [
+                            {
+                                'component': 'VImg',
+                                'props': {
+                                    'src': image_url,
+                                    'height': 60,
+                                    'width': 40,
+                                    'cover': True,
+                                    'class': 'rounded'
+                                }
+                            }
+                        ]
+                    })
+                row_content.append({'component': 'td', 'text': movie.name})
                 movie_rows.append({
                     'component': 'tr',
-                    'content': [
-                        {'component': 'td', 'text': movie.name}
-                    ]
+                    'content': row_content
                 })
 
         # 电视剧表格 - 格式化为 S01: 1-3,5-8 | S02: 9-13 形式
@@ -579,12 +599,32 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         if history:
             for show in history.tv_shows:
                 episode_format = format_season_episodes(show.episodes)
+                image_url = None
+                if show.image_id and self._emby_client:
+                    image_url = self._emby_client.get_image_url(show.image_id, "Primary")
+                row_content = []
+                if image_url:
+                    row_content.append({
+                        'component': 'td',
+                        'props': {'style': 'width: 50px; padding: 8px;'},
+                        'content': [
+                            {
+                                'component': 'VImg',
+                                'props': {
+                                    'src': image_url,
+                                    'height': 60,
+                                    'width': 40,
+                                    'cover': True,
+                                    'class': 'rounded'
+                                }
+                            }
+                        ]
+                    })
+                row_content.append({'component': 'td', 'text': show.series_name})
+                row_content.append({'component': 'td', 'text': episode_format})
                 tvshow_rows.append({
                     'component': 'tr',
-                    'content': [
-                        {'component': 'td', 'text': show.series_name},
-                        {'component': 'td', 'text': episode_format}
-                    ]
+                    'content': row_content
                 })
 
         # 电影表格
@@ -598,6 +638,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         {
                             'component': 'tr',
                             'content': [
+                                {'component': 'th', 'props': {'style': 'width: 50px;'}},
                                 {'component': 'th', 'text': '电影名称'}
                             ]
                         }
@@ -606,7 +647,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 {
                     'component': 'tbody',
                     'content': movie_rows if movie_rows else [
-                        {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 1}}]}
+                        {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 2}}]}
                     ]
                 }
             ]
@@ -623,6 +664,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         {
                             'component': 'tr',
                             'content': [
+                                {'component': 'th', 'props': {'style': 'width: 50px;'}},
                                 {'component': 'th', 'text': '剧集名称'},
                                 {'component': 'th', 'text': '观看集数'}
                             ]
@@ -632,7 +674,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 {
                     'component': 'tbody',
                     'content': tvshow_rows if tvshow_rows else [
-                        {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 2}}]}
+                        {'component': 'tr', 'content': [{'component': 'td', 'text': '暂无记录', 'props': {'colspan': 3}}]}
                     ]
                 }
             ]
@@ -736,6 +778,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 history.tv_shows.append(TvShowWatchRecord(
                     series_name=tv_data.get("series_name", ""),
                     series_id=tv_data.get("series_id"),
+                    image_id=tv_data.get("image_id"),
                     episodes=episodes
                 ))
 
@@ -754,13 +797,15 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         try:
             data = {
                 "movies": [
-                    {"id": m.id, "name": m.name, "year": m.year, "watched_at": m.watched_at}
+                    {"id": m.id, "name": m.name, "year": m.year, "watched_at": m.watched_at,
+                     "image_id": getattr(m, 'image_id', None)}
                     for m in history.movies
                 ],
                 "tv_shows": [
                     {
                         "series_name": tv.series_name,
                         "series_id": tv.series_id,
+                        "image_id": getattr(tv, 'image_id', None),
                         "episodes": [
                             {"id": ep.id, "season": ep.season, "episode": ep.episode,
                              "name": ep.name, "watched_at": ep.watched_at}
@@ -824,7 +869,8 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         id=movie_item.id,
                         name=movie_item.name,
                         year=movie_item.year,
-                        watched_at=movie_item.last_played_date
+                        watched_at=movie_item.last_played_date,
+                        image_id=movie_item.image_id
                     ))
                     movies_added += 1
 
@@ -875,6 +921,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         new_series = TvShowWatchRecord(
                             series_name=series_name,
                             series_id=series_id,
+                            image_id=episode_item.image_id,
                             episodes=[episode_record]
                         )
                         history.tv_shows.append(new_series)

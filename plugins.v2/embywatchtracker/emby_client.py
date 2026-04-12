@@ -117,7 +117,7 @@ class EmbyClient:
             "IsPlayed": "true",
             "Recursive": "true",
             "IncludeItemTypes": "Movie,Episode",
-            "Fields": "ItemIds,Name,Type,SeriesName,SeasonNumber,EpisodeNumber,Year,UserData"
+            "Fields": "ItemIds,Name,Type,SeriesName,SeasonNumber,EpisodeNumber,Year,UserData,ImageTags,SeriesId"
         }
         logger.info(f"Fetching watched items for user {user_id}")
         data = self._request("GET", endpoint, params=params)
@@ -128,6 +128,18 @@ class EmbyClient:
         items = data.get("Items", [])
         logger.info(f"get_watched_items returned {len(items)} items")
         return items
+
+    def get_image_url(self, item_id: str, image_type: str = "Primary") -> Optional[str]:
+        """
+        Get image URL for an item
+
+        :param item_id: Emby item ID
+        :param image_type: Type of image (Primary, Backdrop, Logo, etc.)
+        :return: Image URL or None
+        """
+        if not item_id:
+            return None
+        return f"{self.server_url}/Items/{item_id}/Images/{image_type}?api_key={self.api_key}"
 
     def get_watched_movies(self, user_id: str) -> List[EmbyItem]:
         """
@@ -149,13 +161,15 @@ class EmbyClient:
                     continue
                 seen_ids.add(movie_id)
                 user_data = item.get("UserData", {})
+                image_tags = item.get("ImageTags", {})
                 movies.append(EmbyItem(
                     id=movie_id,
                     name=item.get("Name", ""),
                     type="Movie",
                     year=item.get("ProductionYear"),
                     played=user_data.get("Played", False),
-                    last_played_date=user_data.get("LastPlayedDate")
+                    last_played_date=user_data.get("LastPlayedDate"),
+                    image_id=movie_id if image_tags.get("Primary") else None
                 ))
         return movies
 
@@ -180,16 +194,18 @@ class EmbyClient:
                     continue
                 seen_ids.add(episode_id)
                 user_data = item.get("UserData", {})
+                series_id = item.get("SeriesId")
                 episodes.append(EmbyItem(
                     id=episode_id,
                     name=item.get("Name", ""),
                     type="Episode",
                     series_name=item.get("SeriesName"),
-                    series_id=item.get("SeriesId"),
+                    series_id=series_id,
                     season_number=item.get("ParentIndexNumber"),
                     episode_number=item.get("IndexNumber"),
                     played=user_data.get("Played", False),
-                    last_played_date=user_data.get("LastPlayedDate")
+                    last_played_date=user_data.get("LastPlayedDate"),
+                    image_id=series_id
                 ))
         return episodes
 
