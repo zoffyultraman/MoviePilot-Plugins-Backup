@@ -117,7 +117,7 @@ class EmbyClient:
             "IsPlayed": "true",
             "Recursive": "true",
             "IncludeItemTypes": "Movie,Episode",
-            "Fields": "ItemIds,Name,Type,SeriesName,SeasonNumber,EpisodeNumber,Year,UserData,ImageTags,SeriesId"
+            "Fields": "ItemIds,Name,Type,SeriesName,SeasonNumber,EpisodeNumber,Year,UserData,ImageTags,SeriesId,ProviderIds"
         }
         logger.info(f"Fetching watched items for user {user_id}")
         data = self._request("GET", endpoint, params=params)
@@ -139,7 +139,52 @@ class EmbyClient:
         """
         if not item_id:
             return None
+        # Emby image URL format: /Items/{id}/Images/{type}
+        # The API returns the image directly, we just need the URL
         return f"{self.server_url}/Items/{item_id}/Images/{image_type}?api_key={self.api_key}"
+
+    def get_item_images(self, item_id: str) -> Optional[Dict]:
+        """
+        Get image information for an item
+
+        :param item_id: Emby item ID
+        :return: Dict with image info or None
+        """
+        endpoint = f"/Items/{item_id}/Images"
+        return self._request("GET", endpoint)
+
+    def get_item(self, item_id: str) -> Optional[Dict]:
+        """
+        Get full item information from Emby
+
+        :param item_id: Emby item ID
+        :return: Item dict or None
+        """
+        endpoint = f"/Items/{item_id}"
+        params = {
+            "Fields": "ItemIds,Name,Type,SeriesName,SeasonNumber,EpisodeNumber,Year,UserData,ImageTags,SeriesId,Images"
+        }
+        return self._request("GET", endpoint, params=params)
+
+    def get_item_image_url(self, item_id: str, image_type: str = "Primary") -> Optional[str]:
+        """
+        Get valid image URL for an item by checking if image exists
+
+        :param item_id: Emby item ID
+        :param image_type: Type of image (Primary, Backdrop, Logo, etc.)
+        :return: Image URL or None
+        """
+        if not item_id:
+            return None
+        # First check if the item has this image type
+        images_info = self.get_item_images(item_id)
+        if not images_info:
+            return None
+        # Images info returns a list of image objects with 'ImageType' field
+        for img in images_info:
+            if img.get("ImageType") == image_type:
+                return f"{self.server_url}/Items/{item_id}/Images/{image_type}?api_key={self.api_key}"
+        return None
 
     def get_watched_movies(self, user_id: str) -> List[EmbyItem]:
         """
@@ -162,6 +207,15 @@ class EmbyClient:
                 seen_ids.add(movie_id)
                 user_data = item.get("UserData", {})
                 image_tags = item.get("ImageTags", {})
+                # ProviderIds 直接在 item 顶层
+                provider_ids = item.get("ProviderIds") or {}
+                tmdb_id = provider_ids.get("Tmdb")
+                if isinstance(tmdb_id, str):
+                    try:
+                        tmdb_id = int(tmdb_id)
+                    except (ValueError, TypeError):
+                        tmdb_id = None
+                logger.info(f"DEBUG movie: name={item.get('Name')}, ProviderIds={provider_ids}, tmdb_id={tmdb_id}")
                 movies.append(EmbyItem(
                     id=movie_id,
                     name=item.get("Name", ""),
@@ -169,7 +223,8 @@ class EmbyClient:
                     year=item.get("ProductionYear"),
                     played=user_data.get("Played", False),
                     last_played_date=user_data.get("LastPlayedDate"),
-                    image_id=movie_id if image_tags.get("Primary") else None
+                    image_id=movie_id if image_tags.get("Primary") else None,
+                    tmdb_id=tmdb_id
                 ))
         return movies
 
@@ -195,6 +250,15 @@ class EmbyClient:
                 seen_ids.add(episode_id)
                 user_data = item.get("UserData", {})
                 series_id = item.get("SeriesId")
+                # ProviderIds 在 item 顶层（用户的示例数据显示）
+                provider_ids = item.get("ProviderIds") or {}
+                tmdb_id = provider_ids.get("Tmdb")
+                if isinstance(tmdb_id, str):
+                    try:
+                        tmdb_id = int(tmdb_id)
+                    except (ValueError, TypeError):
+                        tmdb_id = None
+                logger.info(f"DEBUG episode: name={item.get('Name')}, series={item.get('SeriesName')}, ProviderIds={provider_ids}, tmdb_id={tmdb_id}")
                 episodes.append(EmbyItem(
                     id=episode_id,
                     name=item.get("Name", ""),
@@ -205,7 +269,8 @@ class EmbyClient:
                     episode_number=item.get("IndexNumber"),
                     played=user_data.get("Played", False),
                     last_played_date=user_data.get("LastPlayedDate"),
-                    image_id=series_id
+                    image_id=series_id,
+                    tmdb_id=tmdb_id
                 ))
         return episodes
 
