@@ -5,7 +5,7 @@
     "labels": "媒体服务器,Emby,观影记录",
     "version": "1.0.0",
     "icon": "https://raw.githubusercontent.com/zoffyultraman/MoviePilot-Plugins-Backup/main/icons/emby.png",
-    "author": "https://github.com/zoffyultraman",
+    "author": "zoffyultraman",
     "level": 1,
     "history": {
       "v1.0.0": "初始版本"

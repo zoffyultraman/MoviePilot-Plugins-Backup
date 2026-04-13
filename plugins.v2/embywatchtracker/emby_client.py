@@ -215,7 +215,6 @@ class EmbyClient:
                         tmdb_id = int(tmdb_id)
                     except (ValueError, TypeError):
                         tmdb_id = None
-                logger.info(f"DEBUG movie: name={item.get('Name')}, ProviderIds={provider_ids}, tmdb_id={tmdb_id}")
                 movies.append(EmbyItem(
                     id=movie_id,
                     name=item.get("Name", ""),
@@ -258,7 +257,6 @@ class EmbyClient:
                         tmdb_id = int(tmdb_id)
                     except (ValueError, TypeError):
                         tmdb_id = None
-                logger.info(f"DEBUG episode: name={item.get('Name')}, series={item.get('SeriesName')}, ProviderIds={provider_ids}, tmdb_id={tmdb_id}")
                 episodes.append(EmbyItem(
                     id=episode_id,
                     name=item.get("Name", ""),

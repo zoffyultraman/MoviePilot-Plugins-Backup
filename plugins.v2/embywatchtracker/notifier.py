@@ -29,26 +29,20 @@ class WatchTrackerNotifier:
         :param tmdb_id: TMDB ID for precise matching (optional)
         :return: Notification message if watched, None otherwise
         """
-        logger.info(f"DEBUG check_and_notify ENTRY: title={title}, media_type={media_type}, year={year}, tmdb_id={tmdb_id}")
-        logger.info(f"DEBUG check_and_notify: _enabled={self._enabled}, _matcher={self._matcher}")
 
         if not self._enabled:
-            logger.info("DEBUG check_and_notify: _enabled is False, returning None")
             return None
 
         # Create unique key to prevent duplicate notifications
         notify_key = f"{media_type}:{title}:{year}:{tmdb_id}"
-        logger.info(f"DEBUG check_and_notify: notify_key={notify_key}")
 
         is_watched, message = self._matcher.is_media_watched(title, media_type, year, tmdb_id)
-        logger.info(f"DEBUG check_and_notify: is_watched={is_watched}, message={message}")
 
         if is_watched and notify_key not in self._sent_notifications:
             self._sent_notifications.add(notify_key)
             logger.info(f"Watch notification triggered for: {title} (TMDB: {tmdb_id})")
             return message
 
-        logger.info("DEBUG check_and_notify: returning None")
         return None
 
     def clear_notification(self, title: str, media_type: str = "Movie",

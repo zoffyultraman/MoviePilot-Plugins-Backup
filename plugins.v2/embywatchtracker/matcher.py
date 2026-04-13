@@ -53,21 +53,16 @@ class MediaMatcher:
         :param tmdb_id: TMDB ID for precise matching (optional)
         :return: MovieWatchRecord if found
         """
-        logger.info(f"DEBUG find_watched_movie: title={title}, year={year}, tmdb_id={tmdb_id}")
-        logger.info(f"DEBUG find_watched_movie: history has {len(self._history.movies)} movies")
 
         # First try TMDB ID match if available (most precise)
         if tmdb_id:
-            logger.info(f"DEBUG find_watched_movie: trying TMDB ID match with {tmdb_id}")
             for movie in self._history.movies:
-                logger.info(f"DEBUG find_watched_movie: checking movie {movie.name}, tmdb_id={movie.tmdb_id}")
                 if movie.tmdb_id == tmdb_id:
                     logger.info(f"Matched movie by TMDB ID: {tmdb_id}")
                     return movie
 
         # Then try title match
         norm_title = self._normalize_title(title)
-        logger.info(f"DEBUG find_watched_movie: trying title match with normalized title: {norm_title}")
 
         for movie in self._history.movies:
             # Check exact match first
@@ -88,7 +83,6 @@ class MediaMatcher:
                     logger.info(f"Matched movie by fuzzy match: {movie.name}")
                     return movie
 
-        logger.info(f"DEBUG find_watched_movie: no match found")
         return None
 
     def find_watched_series(self, series_name: str,
@@ -132,11 +126,6 @@ class MediaMatcher:
         :param tmdb_id: TMDB ID for precise matching (optional)
         :return: Tuple of (is_watched, message)
         """
-        logger.info(f"DEBUG is_media_watched called: title={title}, media_type={media_type}, year={year}, tmdb_id={tmdb_id}")
-        logger.info(f"DEBUG is_media_watched: _history has {len(self._history.movies)} movies")
-        for m in self._history.movies:
-            logger.info(f"DEBUG history movie: name={m.name}, tmdb_id={m.tmdb_id}")
-
         if media_type == "Movie":
             movie = self.find_watched_movie(title, year, tmdb_id)
             if movie:

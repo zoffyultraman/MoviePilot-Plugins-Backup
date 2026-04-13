@@ -98,7 +98,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         if not config:
             config = self.get_config() or {}
-        logger.info(f"init_plugin received config: {config}")
+        logger.debug(f"init_plugin received config: {config}")
 
         # Load configuration
         self._selected_server = config.get("emby_server", "")
@@ -126,24 +126,24 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             return
 
         # Initialize Emby client
-        logger.info(f"Creating EmbyClient with server: {self._server_url}")
+        logger.debug(f"Creating EmbyClient with server: {self._server_url}")
         self._emby_client = EmbyClient(
             server_url=self._server_url,
             api_key=self._api_key
         )
-        logger.info(f"EmbyClient created, testing connection...")
+        logger.debug(f"EmbyClient created, testing connection...")
         if not self._emby_client.test_connection():
             logger.error("Emby server connection test failed")
             return
-        logger.info("Emby server connection test passed")
+        logger.debug("Emby server connection test passed")
 
         # Authenticate user
-        logger.info(f"Looking for user: {self._emby_username}")
+        logger.debug(f"Looking for user: {self._emby_username}")
         user = self._emby_client.get_user_by_name(self._emby_username)
         if not user:
             logger.error(f"Failed to find Emby user: {self._emby_username}")
             return
-        logger.info(f"Found user: name={user.username}, id={user.user_id}")
+        logger.debug(f"Found user: name={user.username}, id={user.user_id}")
 
         # Handle immediate sync if onlyonce is enabled
         if self._onlyonce:
@@ -175,9 +175,9 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         """
         try:
             # Use MediaServerHelper to get server config
-            logger.info(f"Looking up server config for: {server_name}")
+            logger.debug(f"Looking up server config for: {server_name}")
             config = MediaServerHelper().get_config(server_name)
-            logger.info(f"Config result: {config}")
+            logger.debug(f"Config result: {config}")
             if not config:
                 logger.warning(f"Server {server_name} not found in MediaServerHelper")
                 return False
@@ -186,11 +186,11 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 return False
 
             server_config = config.config or {}
-            logger.info(f"Server config: {server_config}")
+            logger.debug(f"Server config: {server_config}")
             # Handle both possible key names (MoviePilot uses host/apikey, not url/api_key)
             self._server_url = server_config.get("url") or server_config.get("host", "").rstrip("/")
             self._api_key = server_config.get("api_key") or server_config.get("apikey", "")
-            logger.info(f"Set server_url: {self._server_url}, api_key: {self._api_key[:4] if self._api_key else 'None'}...")
+            logger.debug(f"Set server_url: {self._server_url}, api_key: {self._api_key[:4] if self._api_key else 'None'}...")
             return True
         except Exception as e:
             logger.error(f"Failed to use MoviePilot server: {e}")
@@ -219,26 +219,26 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         """
         # Load config from persistent storage
         config = self.get_config() or {}
-        logger.info(f"get_form config: {config}")
+        logger.debug(f"get_form config: {config}")
         selected_server = config.get("emby_server", "")
         emby_username = config.get("emby_username", "")
         sync_interval_hours = int(config.get("sync_interval_hours", 6))
         enable_notification = config.get("enable_notification", True)
         fuzzy_threshold = float(config.get("fuzzy_match_threshold", 0.9))
         enable_incremental_sync = config.get("enable_incremental_sync", True)
-        logger.info(f"get_form selected_server: {selected_server}, emby_username: {emby_username}")
+        logger.debug(f"get_form selected_server: {selected_server}, emby_username: {emby_username}")
 
         # Build server items from MoviePilot media server configs
         all_configs = MediaServerHelper().get_configs(include_disabled=True)
-        logger.info(f"All media server configs: {[c.name for c in all_configs.values()]}")
-        logger.info(f"All config types: {[c.type for c in all_configs.values()]}")
+        logger.debug(f"All media server configs: {[c.name for c in all_configs.values()]}")
+        logger.debug(f"All config types: {[c.type for c in all_configs.values()]}")
         # Emby type check - need case insensitive comparison
         server_items = [
             {"title": config.name, "value": config.name}
             for config in all_configs.values()
             if config.type and config.type.lower() == "emby"
         ]
-        logger.info(f"Emby server items: {server_items}")
+        logger.debug(f"Emby server items: {server_items}")
 
         form = [
             {
@@ -423,7 +423,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         :return: API definitions
         """
-        logger.info("get_api called, registering endpoints")
+        logger.debug("get_api called, registering endpoints")
         return [
             {
                 "path": "/clear_history",
@@ -491,23 +491,23 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
     def api_set_page_tab_movies(self) -> dict:
         """切换到电影标签"""
-        logger.info("=== api_set_page_tab_movies 开始 ===")
+        logger.debug("=== api_set_page_tab_movies 开始 ===")
         result = self.api_set_page_tab("movies")
-        logger.info(f"=== api_set_page_tab_movies 返回: {result} ===")
+        logger.debug(f"=== api_set_page_tab_movies 返回: {result} ===")
         return result
 
     def api_set_page_tab_tvshows(self) -> dict:
         """切换到电视剧标签"""
-        logger.info("=== api_set_page_tab_tvshows 开始 ===")
+        logger.debug("=== api_set_page_tab_tvshows 开始 ===")
         result = self.api_set_page_tab("tvshows")
-        logger.info(f"=== api_set_page_tab_tvshows 返回: {result} ===")
+        logger.debug(f"=== api_set_page_tab_tvshows 返回: {result} ===")
         return result
 
     def get_page(self) -> List[dict]:
         """
         拼装插件详情页面
         """
-        logger.info("get_page called")
+        logger.debug("get_page called")
         # 从配置读取当前标签
         config = self.get_config() or {}
         self._page_tab = config.get("page_tab", "movies")
@@ -516,7 +516,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         # 确保 _emby_client 可用
         emby_client = self._emby_client
         if not emby_client:
-            logger.info("get_page: _emby_client is None, trying to create from config")
+            logger.debug("get_page: _emby_client is None, trying to create from config")
             # 尝试从 MoviePilot 配置获取服务器信息
             server_name = config.get("emby_server", "")
             if server_name and self._use_moviepilot_server(server_name):
@@ -524,7 +524,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                     server_url=self._server_url,
                     api_key=self._api_key
                 )
-                logger.info(f"get_page: created new EmbyClient for server {self._server_url}")
+                logger.debug(f"get_page: created new EmbyClient for server {self._server_url}")
 
         try:
             history = self._load_history()
@@ -545,7 +545,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 image_url = None
                 if movie.image_id and emby_client:
                     image_url = emby_client.get_item_image_url(movie.image_id, "Primary")
-                    logger.info(f"DEBUG movie: name={movie.name}, image_id={movie.image_id}, image_url={image_url}")
                 row_content = []
                 if image_url:
                     row_content.append({
@@ -616,7 +615,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                 image_url = None
                 if show.image_id and emby_client:
                     image_url = emby_client.get_item_image_url(show.image_id, "Primary")
-                    logger.info(f"DEBUG tvshow: name={show.series_name}, image_id={show.image_id}, image_url={image_url}")
                 row_content = []
                 if image_url:
                     row_content.append({
@@ -766,9 +764,7 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
     def _register_events(self):
         """Register event handlers"""
-        logger.info("DEBUG _register_events: registering SubscribeAdded handler")
         self.eventmanager.register(EventType.SubscribeAdded)(self._on_subscribe_added)
-        logger.info("DEBUG _register_events: handler registered successfully")
 
     def _load_history(self) -> WatchHistory:
         """
@@ -853,17 +849,17 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             return 0, 0
 
         logger.info("Starting Emby watch history sync")
-        logger.info(f"User ID: {self._user_id}")
+        logger.debug(f"User ID: {self._user_id}")
 
         try:
             history = self._load_history()
             logger.info("Fetching movies...")
             movies = self._emby_client.get_watched_movies(self._user_id)
-            logger.info(f"Movies fetched: {movies}")
+            logger.debug(f"Movies fetched: {movies}")
 
             logger.info("Fetching episodes...")
             episodes = self._emby_client.get_watched_episodes(self._user_id)
-            logger.info(f"Episodes fetched: {episodes}")
+            logger.debug(f"Episodes fetched: {episodes}")
 
             if movies is None:
                 logger.error("Failed to fetch movies from Emby")
@@ -878,10 +874,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             movies_added = 0
             episodes_added = 0
             existing_movie_ids = {m.id for m in history.movies}
-
-            # 调试：打印所有要处理的 episodes
-            for ep in episodes:
-                logger.info(f"DEBUG episode: id={ep.id}, series={ep.series_name}, S{ep.season_number}E{ep.episode_number}")
 
             for movie_item in movies:
                 if movie_item.played and movie_item.id not in existing_movie_ids:
@@ -898,7 +890,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             # 用 series_id 作为 key 来组织 episodes
             # series_id -> TvShowWatchRecord
             series_map = {tv.series_id: tv for tv in history.tv_shows}
-            logger.info(f"DEBUG series_map initial keys: {list(series_map.keys())}")
 
             for idx, episode_item in enumerate(episodes):
                 if episode_item.played:
@@ -913,8 +904,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                     # 获取 series 信息
                     series_id = episode_item.series_id
                     series_name = (episode_item.series_name or "Unknown Series").strip()
-                    logger.info(f"DEBUG[{idx}] episode: series={series_name}, series_id={repr(series_id)}, S{episode_record.season}E{episode_record.episode}, ep_id={episode_record.id}")
-                    logger.info(f"DEBUG[{idx}] series_map keys before: {list(series_map.keys())}")
 
                     # 按 id 去重（检查是否已处理过这个 episode）
                     found = False
@@ -922,7 +911,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         for existing_ep in tv_show.episodes:
                             if existing_ep.id == episode_record.id:
                                 found = True
-                                logger.info(f"DEBUG[{idx}]: id duplicate found in {tv_show.series_name}")
                                 break
                         if found:
                             break
@@ -931,12 +919,10 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         continue
 
                     # 用 series_id 查找或创建 series
-                    logger.info(f"DEBUG[{idx}]: checking series_id={repr(series_id)} in series_map, result={series_id in series_map}")
                     if series_id in series_map:
                         # series 已存在，添加 episode
                         series_map[series_id].episodes.append(episode_record)
                         episodes_added += 1
-                        logger.info(f"DEBUG[{idx}]: added to existing series {series_name}")
                     else:
                         # 创建新 series
                         new_series = TvShowWatchRecord(
@@ -949,7 +935,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
                         history.tv_shows.append(new_series)
                         series_map[series_id] = new_series
                         episodes_added += 1
-                        logger.info(f"DEBUG[{idx}]: created new series {series_name}")
 
             history.last_sync_time = int(__import__("time").time())
             self._save_history(history)
@@ -970,8 +955,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         :param event: SubscribeAdded event
         """
-        logger.info(f"DEBUG _on_subscribe_added called, event_data={event.event_data}")
-        logger.info(f"DEBUG _notifier={self._notifier}, _enable_notification={self._enable_notification}")
 
         if not self._enable_notification:
             logger.info("Notification skipped: notification disabled")
@@ -980,7 +963,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
         event_data = event.event_data or {}
         # New event structure uses 'mediainfo' directly, old used 'subscribe'
         mediainfo = event_data.get("mediainfo")
-        logger.info(f"DEBUG mediainfo={mediainfo}")
 
         if not mediainfo:
             logger.info("Notification skipped: no mediainfo in event")
@@ -999,7 +981,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             except (ValueError, TypeError):
                 tmdb_id = None
 
-        logger.info(f"DEBUG title={title}, media_type={media_type}, year={year}, tmdb_id={tmdb_id}")
 
         if not title:
             logger.info("Notification skipped: no title")
@@ -1007,7 +988,6 @@ class EmbyWatchTrackerPlugin(_PluginBase):
 
         # Try to get notifier, initialize if needed
         if not self._notifier:
-            logger.info("DEBUG _notifier is None, trying to initialize")
             # Check if we have the required config
             if not self._emby_client or not self._user_id:
                 logger.info("Notification skipped: Emby client not initialized")
@@ -1015,18 +995,12 @@ class EmbyWatchTrackerPlugin(_PluginBase):
             history = self._load_history()
             self._matcher = MediaMatcher(history, self._fuzzy_threshold)
             self._notifier = WatchTrackerNotifier(self._matcher, self._enable_notification)
-            logger.info("DEBUG _notifier initialized")
 
-        logger.info(f"DEBUG _notifier type: {type(self._notifier)}")
-        logger.info(f"DEBUG calling check_and_notify with: title={title}, media_type={media_type}, year={year}, tmdb_id={tmdb_id}")
         try:
             message = self._notifier.check_and_notify(title, media_type, year, tmdb_id)
         except Exception as e:
-            logger.error(f"DEBUG check_and_notify exception: {e}")
-            import traceback
-            logger.error(f"DEBUG traceback: {traceback.format_exc()}")
+            logger.error(f"check_and_notify exception: {e}")
             message = None
-        logger.info(f"DEBUG check_and_notify returned: {message}")
 
         if message:
             import asyncio
